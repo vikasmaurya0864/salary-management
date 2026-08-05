@@ -35,6 +35,24 @@ const envSchema = z.object({
   // API_KEY: the API key gates "is this a legitimate client app", the JWT
   // identifies "which user is making this request".
   JWT_SECRET: z.string().min(16, "JWT_SECRET must be at least 16 characters long"),
+
+  // ---- PostgreSQL connection ----
+  DB_HOST: z.string().min(1).default("localhost"),
+  DB_PORT: z.coerce.number().int().positive().default(5432),
+  DB_NAME: z.string().min(1, "DB_NAME is required"),
+  DB_USER: z.string().min(1, "DB_USER is required"),
+  DB_PASSWORD: z.string().min(1, "DB_PASSWORD is required"),
+  // Set to "true" only when connecting to a Postgres provider that requires
+  // SSL (most managed cloud DBs). Leave unset for local development.
+  DB_SSL: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+
+  // Bootstrap admin account, created by the seeder so there's a way to log
+  // in and start creating HR/Employee users on a fresh database.
+  ADMIN_EMAIL: z.string().email().default("admin@salary-management.local"),
+  ADMIN_PASSWORD: z.string().min(8, "ADMIN_PASSWORD must be at least 8 characters long"),
 });
 
 type RawEnv = z.infer<typeof envSchema>;
@@ -68,6 +86,16 @@ export interface EnvConfig {
   isTest: boolean;
   apiKey: string;
   jwtSecret: string;
+  db: {
+    host: string;
+    port: number;
+    name: string;
+    user: string;
+    password: string;
+    ssl: boolean;
+  };
+  adminEmail: string;
+  adminPassword: string;
 }
 
 export const env: Readonly<EnvConfig> = Object.freeze({
@@ -80,4 +108,14 @@ export const env: Readonly<EnvConfig> = Object.freeze({
   isTest: rawEnv.NODE_ENV === "test",
   apiKey: rawEnv.API_KEY,
   jwtSecret: rawEnv.JWT_SECRET,
+  db: Object.freeze({
+    host: rawEnv.DB_HOST,
+    port: rawEnv.DB_PORT,
+    name: rawEnv.DB_NAME,
+    user: rawEnv.DB_USER,
+    password: rawEnv.DB_PASSWORD,
+    ssl: rawEnv.DB_SSL,
+  }),
+  adminEmail: rawEnv.ADMIN_EMAIL,
+  adminPassword: rawEnv.ADMIN_PASSWORD,
 });

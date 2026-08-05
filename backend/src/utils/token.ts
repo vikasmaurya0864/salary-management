@@ -1,13 +1,7 @@
 import type { FastifyInstance } from "fastify";
+import type { AuthUser } from "../plugins/jwt";
 
-/**
- * Payload embedded in every issued JWT. Extend this as the real user model
- * takes shape (e.g. `role`, `email`).
- */
-export interface AuthTokenPayload {
-  userId: string;
-  [key: string]: unknown;
-}
+export type AuthTokenPayload = AuthUser;
 
 export interface IssuedToken {
   token: string;

@@ -2,14 +2,29 @@ import fastifyJwt from "@fastify/jwt";
 import fp from "fastify-plugin";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { env } from "../config/env";
+import type { RoleName } from "../constants/roles";
 import type { ErrorResponseBody } from "./error-handler";
+
+/** Shape of the data embedded in every issued JWT (see `src/utils/token.ts`). */
+export interface AuthUser {
+  userId: string;
+  role: RoleName;
+}
+
+declare module "@fastify/jwt" {
+  interface FastifyJWT {
+    payload: AuthUser;
+    user: AuthUser;
+  }
+}
 
 declare module "fastify" {
   interface FastifyInstance {
     /**
      * `preHandler` to protect a route with JWT auth, e.g.:
      *   app.get("/me", { preHandler: app.authenticate }, handler)
-     * Populates `request.user` with the decoded token payload on success.
+     * Populates `request.user` (typed as `AuthUser`) with the decoded token
+     * payload on success.
      */
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
