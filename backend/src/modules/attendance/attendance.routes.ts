@@ -5,6 +5,7 @@ import { ROLE_NAMES } from "../../constants/roles";
 import type { IdParams } from "../../types/route.types";
 import {
   getAttendanceHandler,
+  getAttendanceReportHandler,
   getCorrectionHandler,
   listAttendanceHandler,
   listCorrectionsHandler,
@@ -28,6 +29,10 @@ export async function attendanceRoutes(app: FastifyInstance): Promise<void> {
 
   // List attendance — own records for Employee, Employee records for HR, all for Admin.
   app.get("/", listAttendanceHandler);
+
+  // Downloadable monthly report (CSV by default, or ?format=json). Employees: own only,
+  // past 6 months. HR/Admin: any user, bounded only by that user's account-creation month.
+  app.get("/report", getAttendanceReportHandler);
 
   // Raise a correction request for a past date ("query" awaiting Admin/HR approval).
   app.post("/corrections", requestCorrectionHandler);

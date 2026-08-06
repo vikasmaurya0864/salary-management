@@ -74,3 +74,14 @@ export const reviewCorrectionSchema = z.object({
   reviewNote: z.string().trim().max(500).optional(),
 });
 export type ReviewCorrectionInput = z.infer<typeof reviewCorrectionSchema>;
+
+// Monthly attendance report — Employees always get their own (bounded to the
+// past 6 months, checked in the service); Admin/HR may target any userId
+// (bounded only by that user's account-creation month, no 6-month cap).
+export const attendanceReportQuerySchema = z.object({
+  month: z.coerce.number().int().min(1).max(12),
+  year: z.coerce.number().int().min(2000).max(2100),
+  userId: z.string().uuid().optional(),
+  format: z.enum(["csv", "json"]).default("csv"),
+});
+export type AttendanceReportQuery = z.infer<typeof attendanceReportQuerySchema>;

@@ -1,4 +1,5 @@
 import fastify, { type FastifyInstance } from "fastify";
+import cors from "@fastify/cors";
 import sensible from "@fastify/sensible";
 import { loggerOptions } from "./utils/logger";
 import { registerErrorHandler, registerProcessErrorHandlers } from "./plugins/error-handler";
@@ -17,6 +18,14 @@ export function buildApp(): FastifyInstance {
   // completion, including method, url, statusCode and responseTime.
   const app = fastify({
     logger: loggerOptions,
+  });
+
+  // Allow the React frontend (Vite default :5173) to call /api during local
+  // development. Tighten origin in production as needed.
+  void app.register(cors, {
+    origin: true,
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization", "X-API-Key"],
   });
 
   void app.register(sensible);

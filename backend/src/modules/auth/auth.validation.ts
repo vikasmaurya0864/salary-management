@@ -21,3 +21,8 @@ export const registerSchema = z.object({
   address: z.string().trim().max(500).optional(),
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
+
+export const refreshTokenSchema = z.object({
+  refreshToken: z.string().trim().min(1, "refreshToken is required"),
+});
+export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;

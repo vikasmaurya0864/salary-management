@@ -42,3 +42,27 @@ export function calculateWorkingHours(checkIn: Date, checkOut: Date | null): num
   const hours = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60);
   return Math.round(hours * 100) / 100;
 }
+
+/** First and last calendar day (`YYYY-MM-DD`) of a given month/year, e.g. for report date-range queries. `month` is 1-12. */
+export function monthDateRange(year: number, month: number): { start: string; end: string } {
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 0)); // day 0 of next month == last day of this month
+  return { start: toDateOnly(start), end: toDateOnly(end) };
+}
+
+/** Number of Mon-Fri days between two `YYYY-MM-DD` dates (inclusive) — i.e. how many attendance rows a month *should* have. */
+export function countWeekdaysInRange(startDate: string, endDate: string): number {
+  let count = 0;
+  const cursor = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+  while (cursor.getTime() <= end.getTime()) {
+    if (!isWeekend(cursor)) count += 1;
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return count;
+}
+
+/** Sortable `year*12+month` key so two (year, month) pairs can be compared with plain `<`/`>`. `month` is 1-12. */
+export function monthKey(year: number, month: number): number {
+  return year * 12 + (month - 1);
+}

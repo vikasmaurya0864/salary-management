@@ -35,10 +35,20 @@ files) pending explicit go-ahead to run them against Postgres.
 [DONE] `/api` prefix for every backend route (src/routes/api/index.ts)
 [DONE] X-API-Key header guard on every /api/* route (src/plugins/api-key-guard.ts)
        - Timing-safe comparison against API_KEY env var
-[DONE] JWT auth (src/plugins/jwt.ts, src/utils/token.ts)
-       - Tokens are NON-EXPIRING by design (no `exp` claim, expiresAt: null)
-       - `app.authenticate` preHandler decorator verifies the token and
-         populates request.user = { userId, role }
+[DONE] Auth gateway order on protected /api/* routes:
+       1) X-API-Key (portal/client gate)
+       2) JWT access token verification (`app.authenticate`)
+       3) Per-user permission grant (`checkPermission`) — Admin bypasses
+[DONE] JWT access tokens (src/plugins/jwt.ts, src/utils/token.ts)
+       - SHORT-LIVED: default 15 minutes (`JWT_ACCESS_TOKEN_TTL_SECONDS=900`)
+       - Expired access tokens return 401 with code TOKEN_EXPIRED so a
+         client can call the refresh endpoint instead of forcing login
+       - `app.authenticate` populates request.user = { userId, role }
+[DONE] Refresh tokens (src/models/refresh-token.model.ts)
+       - Opaque random token; only SHA-256 hash stored in `refresh_tokens`
+       - Columns: id, userId, tokenHash, expiresAt, revokedAt, timestamps
+       - Default lifetime 7 days (`REFRESH_TOKEN_TTL_DAYS`)
+       - Rotated on every successful refresh (old row revoked)
 [DONE] Role-based access control - coarse tier (src/middleware/rbac.ts)
        - `requireRole(...roles)` preHandler restricts a route to specific roles
 [DONE] Role-based access control - fine-grained tier (inside each *.service.ts)
@@ -88,6 +98,7 @@ files) pending explicit go-ahead to run them against Postgres.
        - create-permissions (per-user endpoint grants)
        - create-attendances
        - create-attendance-correction-requests
+       - create-refresh-tokens
 [DONE] Seeder written (NOT yet run):
        - Seeds ADMIN / HR / EMPLOYEE roles
        - Seeds one bootstrap admin user (credentials from .env)
@@ -97,11 +108,18 @@ files) pending explicit go-ahead to run them against Postgres.
 -------------------------------------------------------------------------------
 5. USER REGISTRATION & AUTH  (src/modules/auth/)
 -------------------------------------------------------------------------------
-[DONE] POST /api/auth/register  - PUBLIC self-registration
-       - Always creates the account with the EMPLOYEE role (default), even
-         if a different role is requested - only Admin can grant HR/other roles
-[DONE] POST /api/auth/login     - PUBLIC login
-       - Verifies email + bcrypt-hashed password, issues a non-expiring JWT
+[DONE] POST /api/auth/register  - PUBLIC self-registration (API key only)
+       - Always creates the account with the EMPLOYEE role (default)
+       - Returns accessToken (15m) + refreshToken (+ user)
+[DONE] POST /api/auth/login     - PUBLIC login (API key only)
+       - Verifies email + bcrypt-hashed password
+       - Returns accessToken (15m) + refreshToken (+ user); refresh hash
+         persisted in `refresh_tokens`
+[DONE] POST /api/auth/refresh   - PUBLIC refresh (API key only, no JWT)
+       - Body: { refreshToken }
+       - Looks up hash in DB; if valid + not expired + not revoked:
+         rotates refresh token and returns a new accessToken + refreshToken
+       - If invalid/expired/revoked: 401 INVALID_REFRESH_TOKEN → login again
 [DONE] Passwords hashed with bcrypt (src/utils/password.ts, model hooks on
        User: beforeCreate / beforeUpdate)
 
@@ -174,6 +192,26 @@ files) pending explicit go-ahead to run them against Postgres.
 [DONE] No DELETE endpoint for attendance at all - history is never deletable
        through the API (audit trail integrity)
 
+   -- Downloadable monthly report -----------------------------------------
+[DONE] GET /api/attendance/report?month=&year=&userId=&format=csv|json
+       - Employee: always own report only; requested month/year must fall
+         within a rolling 6-month window (current month + previous 5) -
+         older or future months are rejected
+       - HR/Admin: may target ANY user via ?userId= (defaults to self if
+         omitted); NO 6-month cap - the only floor is that user's own
+         account-creation month (can't report on a month before they
+         existed); HR is still limited to Employee targets, same as the
+         rest of the module
+       - Report = daily records (date, day, status, check-in/out, working
+         hours) for the month + a summary (total weekdays, present/absent/
+         holiday counts, unmarked days, total working hours)
+       - format=csv (default): actual file download - Content-Disposition
+         attachment, opens directly in Excel/Sheets
+       - format=json: same data as structured JSON (for a future frontend)
+       - Subject to the same checkPermission grant system as every other
+         attendance route (Admin bypasses; HR/Employee need an ACTIVE grant
+         for GET /api/attendance/report)
+
    -- Correction requests / "claims" for PAST dates -----------------------
 [DONE] AttendanceCorrectionRequest model (src/models/attendance-correction-request.model.ts)
        - Separate table: userId, attendanceId (nullable), requestedDate,
@@ -226,7 +264,20 @@ files) pending explicit go-ahead to run them against Postgres.
     created (currently every HR/Employee has ZERO permission grants until
     Admin manually creates them via POST /api/permissions)
 [ ] Payroll / compensation module (not started)
-[ ] Frontend (not started - backend only so far)
+
+
+-------------------------------------------------------------------------------
+12. FRONTEND  (frontend/ — React + TypeScript + Vite)
+-------------------------------------------------------------------------------
+[DONE] React TS app with role-based routing after login
+[DONE] Auth client: X-API-Key + JWT access token + auto refresh on TOKEN_EXPIRED
+[DONE] Admin dashboard (/admin): users, roles, permissions, attendance,
+       corrections, reports, profile
+[DONE] HR dashboard (/hr): employees, attendance, corrections, reports, profile
+[DONE] Employee dashboard (/employee): mark attendance, attendance report
+       (6 months), edit profile (name/mobile/contact)
+[DONE] Backend CORS enabled (@fastify/cors) for local Vite origin
+[DONE] frontend/.env: VITE_API_BASE_URL, VITE_API_KEY
 
 
 ===============================================================================

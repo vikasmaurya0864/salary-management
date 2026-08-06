@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import {
+  attendanceReportQuerySchema,
   listAttendanceQuerySchema,
   listCorrectionsQuerySchema,
   markAttendanceSchema,
@@ -7,9 +8,11 @@ import {
   reviewCorrectionSchema,
 } from "./attendance.validation";
 import * as attendanceService from "./attendance.service";
+import type { AttendanceReport } from "./attendance.service";
 import { sendValidationError } from "../../utils/validation";
 import { successResponse } from "../../utils/response";
 import { scopedLogger } from "../../utils/scoped-logger";
+import { toCsv } from "../../utils/csv";
 import type { IdParams } from "../../types/route.types";
 
 const LAYER = "AttendanceController";
@@ -56,6 +59,58 @@ export async function getAttendanceHandler(request: FastifyRequest<{ Params: IdP
 
   log.info({ id: request.params.id }, "Get attendance - request completed");
   return reply.send(successResponse(attendance));
+}
+
+/** Renders a report as a downloadable CSV: a couple of title rows, the daily records, then a summary block. */
+function buildAttendanceReportCsv(report: AttendanceReport): string {
+  const rows: unknown[][] = [
+    [`Attendance Report - ${report.user.firstName} ${report.user.lastName} (${report.user.email})`],
+    [`Month/Year: ${String(report.month).padStart(2, "0")}/${report.year}`],
+    [],
+    ["Date", "Day", "Status", "Check In", "Check Out", "Working Hours"],
+    ...report.records.map((r) => [
+      r.date,
+      r.day,
+      r.status,
+      r.checkInTime ? r.checkInTime.toISOString() : "",
+      r.checkOutTime ? r.checkOutTime.toISOString() : "",
+      r.workingHours ?? "",
+    ]),
+    [],
+    ["Summary"],
+    ["Total Weekdays", report.summary.totalWeekdays],
+    ["Present", report.summary.presentDays],
+    ["Absent", report.summary.absentDays],
+    ["Holiday", report.summary.holidayDays],
+    ["Unmarked", report.summary.unmarkedDays],
+    ["Total Working Hours", report.summary.totalWorkingHours],
+  ];
+  return toCsv(rows);
+}
+
+export async function getAttendanceReportHandler(request: FastifyRequest, reply: FastifyReply) {
+  const log = scopedLogger(request.log, LAYER, "getAttendanceReportHandler");
+  log.info("Get attendance report - request received");
+
+  const parsed = attendanceReportQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    return sendValidationError(reply, parsed.error);
+  }
+
+  const report = await attendanceService.getAttendanceReport(log, requestingUser(request), parsed.data);
+
+  if (parsed.data.format === "json") {
+    log.info({ targetUserId: report.user.id }, "Get attendance report - request completed (json)");
+    return reply.send(successResponse(report));
+  }
+
+  const csv = buildAttendanceReportCsv(report);
+  const filename = `attendance-report-${report.user.id}-${report.year}-${String(report.month).padStart(2, "0")}.csv`;
+  log.info({ targetUserId: report.user.id, filename }, "Get attendance report - request completed (csv)");
+  return reply
+    .header("Content-Type", "text/csv; charset=utf-8")
+    .header("Content-Disposition", `attachment; filename="${filename}"`)
+    .send(csv);
 }
 
 export async function requestCorrectionHandler(request: FastifyRequest, reply: FastifyReply) {

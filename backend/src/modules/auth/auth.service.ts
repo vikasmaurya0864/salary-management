@@ -1,16 +1,29 @@
+import type { FastifyInstance } from "fastify";
 import type { User } from "../../models";
 import * as userRepository from "../../repositories/user.repository";
 import * as roleRepository from "../../repositories/role.repository";
+import * as refreshTokenRepository from "../../repositories/refresh-token.repository";
 import { comparePassword } from "../../utils/password";
+import { generateRefreshToken, hashRefreshToken, issueAccessToken } from "../../utils/token";
 import { ROLE_NAMES, type RoleName } from "../../constants/roles";
 import { AppError, ConflictError } from "../../utils/app-error";
 import type { Logger } from "../../utils/logger";
 import { scopedLogger } from "../../utils/scoped-logger";
-import type { LoginInput, RegisterInput } from "./auth.validation";
+import type { LoginInput, RefreshTokenInput, RegisterInput } from "./auth.validation";
 
 const LAYER = "AuthService";
 
 export interface AuthenticatedUser {
+  user: User;
+  roleName: RoleName;
+}
+
+/** Access + refresh pair returned by login / register / refresh. */
+export interface AuthSession {
+  accessToken: string;
+  accessTokenExpiresAt: Date;
+  refreshToken: string;
+  refreshTokenExpiresAt: Date;
   user: User;
   roleName: RoleName;
 }
@@ -84,4 +97,71 @@ export async function registerUser(logger: Logger, input: RegisterInput): Promis
   user.role = employeeRole;
   log.info({ id: user.id }, "Register - completed");
   return { user, roleName: ROLE_NAMES.EMPLOYEE };
+}
+
+/**
+ * Issues a short-lived access JWT + a long-lived opaque refresh token,
+ * persisting only the refresh token's SHA-256 hash in `refresh_tokens`.
+ */
+export async function createAuthSession(
+  logger: Logger,
+  app: FastifyInstance,
+  user: User,
+  roleName: RoleName
+): Promise<AuthSession> {
+  const log = scopedLogger(logger, LAYER, "createAuthSession");
+  log.info({ userId: user.id }, "Create auth session - issuing tokens");
+
+  const { accessToken, accessTokenExpiresAt } = issueAccessToken(app, { userId: user.id, role: roleName });
+  const { refreshToken, refreshTokenExpiresAt, tokenHash } = generateRefreshToken();
+
+  await refreshTokenRepository.create(log, {
+    userId: user.id,
+    tokenHash,
+    expiresAt: refreshTokenExpiresAt,
+  });
+
+  log.info({ userId: user.id, accessTokenExpiresAt, refreshTokenExpiresAt }, "Create auth session - completed");
+  return { accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt, user, roleName };
+}
+
+/**
+ * Validates a refresh token against the DB. If still valid, revokes it
+ * (rotation) and returns a fresh access + refresh pair. If missing,
+ * expired, or already revoked — caller should force a full login again.
+ */
+export async function refreshAuthSession(
+  logger: Logger,
+  app: FastifyInstance,
+  input: RefreshTokenInput
+): Promise<AuthSession> {
+  const log = scopedLogger(logger, LAYER, "refreshAuthSession");
+  log.info("Refresh auth session - processing");
+
+  const tokenHash = hashRefreshToken(input.refreshToken);
+  const stored = await refreshTokenRepository.findByTokenHash(log, tokenHash);
+
+  if (!stored || stored.revokedAt || stored.expiresAt.getTime() <= Date.now()) {
+    if (stored && !stored.revokedAt) {
+      // Expired but not yet marked — revoke so it can't be retried.
+      await refreshTokenRepository.revokeById(log, stored.id);
+    }
+    log.warn("Refresh auth session - rejected, invalid or expired refresh token");
+    throw new AppError("Invalid or expired refresh token. Please log in again.", 401, "INVALID_REFRESH_TOKEN");
+  }
+
+  const user = stored.user;
+  if (!user || !user.role) {
+    log.error({ refreshTokenId: stored.id }, "Refresh auth session - linked user/role missing");
+    await refreshTokenRepository.revokeById(log, stored.id);
+    throw new AppError("Invalid or expired refresh token. Please log in again.", 401, "INVALID_REFRESH_TOKEN");
+  }
+
+  // Rotate: old refresh token is one-time use.
+  await refreshTokenRepository.revokeById(log, stored.id);
+
+  const roleName = user.role.name as RoleName;
+  const session = await createAuthSession(log, app, user, roleName);
+  log.info({ userId: user.id }, "Refresh auth session - completed");
+  return session;
 }

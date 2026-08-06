@@ -1,3 +1,4 @@
+import { Op } from "sequelize";
 import { Attendance, Role, User } from "../models";
 import type { AttendanceStatus, Workday } from "../constants/attendance";
 import type { Logger } from "../utils/logger";
@@ -73,4 +74,21 @@ export async function findAndCountAll(
   });
   log.info({ count: result.count }, "List attendance - query completed");
   return result;
+}
+
+/** All of one user's attendance rows within a `[startDate, endDate]` (`YYYY-MM-DD`) range, oldest first — used to build a monthly report (small, fixed-size result, so no pagination). */
+export async function findAllForUserInRange(
+  logger: Logger,
+  userId: string,
+  startDate: string,
+  endDate: string
+): Promise<Attendance[]> {
+  const log = scopedLogger(logger, LAYER, "findAllForUserInRange");
+  log.info({ userId, startDate, endDate }, "Find attendance in range - querying database");
+  const rows = await Attendance.findAll({
+    where: { userId, date: { [Op.between]: [startDate, endDate] } },
+    order: [["date", "ASC"]],
+  });
+  log.info({ userId, startDate, endDate, count: rows.length }, "Find attendance in range - completed");
+  return rows;
 }

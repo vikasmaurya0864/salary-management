@@ -4,6 +4,7 @@ import { User } from "./user.model";
 import { Permission } from "./permission.model";
 import { Attendance } from "./attendance.model";
 import { AttendanceCorrectionRequest } from "./attendance-correction-request.model";
+import { RefreshToken } from "./refresh-token.model";
 
 Role.hasMany(User, { foreignKey: "roleId", as: "users" });
 User.belongsTo(Role, { foreignKey: "roleId", as: "role" });
@@ -22,4 +23,7 @@ AttendanceCorrectionRequest.belongsTo(User, { foreignKey: "userId", as: "request
 
 AttendanceCorrectionRequest.belongsTo(User, { foreignKey: "reviewedBy", as: "reviewer" });
 
-export { sequelize, Role, User, Permission, Attendance, AttendanceCorrectionRequest };
+User.hasMany(RefreshToken, { foreignKey: "userId", as: "refreshTokens" });
+RefreshToken.belongsTo(User, { foreignKey: "userId", as: "user" });
+
+export { sequelize, Role, User, Permission, Attendance, AttendanceCorrectionRequest, RefreshToken };

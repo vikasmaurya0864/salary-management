@@ -38,8 +38,9 @@ declare module "fastify" {
  * to every route in the app, not just this plugin's own encapsulation
  * context (Fastify plugins are encapsulated by default).
  *
- * Tokens are signed with no `expiresIn`, so they carry no `exp` claim and
- * never expire — see `signAuthToken` in `src/utils/token.ts`.
+ * Access tokens are short-lived (see `JWT_ACCESS_TOKEN_TTL_SECONDS` /
+ * `issueAccessToken`). When they expire, clients call POST /api/auth/refresh
+ * with a stored refresh token rather than forcing a full login.
  */
 export default fp(async function jwtPlugin(app: FastifyInstance) {
   await app.register(fastifyJwt, {
@@ -52,11 +53,20 @@ export default fp(async function jwtPlugin(app: FastifyInstance) {
     } catch (error) {
       request.log.warn({ err: error, url: request.url }, "JWT verification failed");
 
+      // @fastify/jwt wraps fast-jwt's expired error as FST_JWT_AUTHORIZATION_TOKEN_EXPIRED.
+      const isExpired =
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: string }).code === "FST_JWT_AUTHORIZATION_TOKEN_EXPIRED";
+
       const body: ErrorResponseBody = {
         success: false,
         error: {
-          message: "Missing or invalid authentication token",
-          code: "UNAUTHENTICATED",
+          message: isExpired
+            ? "Access token has expired. Use the refresh token endpoint to get a new one."
+            : "Missing or invalid authentication token",
+          code: isExpired ? "TOKEN_EXPIRED" : "UNAUTHENTICATED",
           statusCode: 401,
         },
       };

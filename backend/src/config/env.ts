@@ -35,6 +35,10 @@ const envSchema = z.object({
   // API_KEY: the API key gates "is this a legitimate client app", the JWT
   // identifies "which user is making this request".
   JWT_SECRET: z.string().min(16, "JWT_SECRET must be at least 16 characters long"),
+  // Short-lived access JWT lifetime in seconds (default 15 minutes).
+  JWT_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  // Opaque refresh token lifetime in days. Stored (hashed) in `refresh_tokens`.
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(7),
 
   // ---- PostgreSQL connection ----
   DB_HOST: z.string().min(1).default("localhost"),
@@ -79,6 +83,8 @@ const envSchema = z.object({
     .default("false")
     .transform((value) => value === "true"),
   SMTP_FROM: z.string().min(1).default("Salary Management <no-reply@salary-management.local>"),
+  // Contact address shown in attendance reminder emails ("contact HR team …").
+  HR_CONTACT_EMAIL: z.string().email().default("hr@info.in"),
 
   // ---- Cron jobs ----
   // Timezone the 8am/7pm attendance job schedules are interpreted in. Keep
@@ -125,6 +131,8 @@ export interface EnvConfig {
   isTest: boolean;
   apiKey: string;
   jwtSecret: string;
+  jwtAccessTokenTtlSeconds: number;
+  refreshTokenTtlDays: number;
   db: {
     host: string;
     port: number;
@@ -135,6 +143,7 @@ export interface EnvConfig {
   };
   adminEmail: string;
   adminPassword: string;
+  hrContactEmail: string;
   smtp: {
     host: string | undefined;
     port: number;
@@ -157,6 +166,8 @@ export const env: Readonly<EnvConfig> = Object.freeze({
   isTest: rawEnv.NODE_ENV === "test",
   apiKey: rawEnv.API_KEY,
   jwtSecret: rawEnv.JWT_SECRET,
+  jwtAccessTokenTtlSeconds: rawEnv.JWT_ACCESS_TOKEN_TTL_SECONDS,
+  refreshTokenTtlDays: rawEnv.REFRESH_TOKEN_TTL_DAYS,
   db: Object.freeze({
     host: rawEnv.DB_HOST,
     port: rawEnv.DB_PORT,
@@ -167,6 +178,7 @@ export const env: Readonly<EnvConfig> = Object.freeze({
   }),
   adminEmail: rawEnv.ADMIN_EMAIL,
   adminPassword: rawEnv.ADMIN_PASSWORD,
+  hrContactEmail: rawEnv.HR_CONTACT_EMAIL,
   smtp: Object.freeze({
     host: rawEnv.SMTP_HOST,
     port: rawEnv.SMTP_PORT,

@@ -6,12 +6,23 @@ import * as userRepository from "../../repositories/user.repository";
 import * as roleRepository from "../../repositories/role.repository";
 import { ROLE_NAMES, type RoleName } from "../../constants/roles";
 import { ATTENDANCE_STATUS, CORRECTION_STATUS } from "../../constants/attendance";
+import { env } from "../../config/env";
 import { AppError, BadRequestError, ForbiddenError, NotFoundError } from "../../utils/app-error";
 import type { Logger } from "../../utils/logger";
 import { scopedLogger } from "../../utils/scoped-logger";
 import { sendMail } from "../../utils/mailer";
-import { calculateWorkingHours, getTodayDateOnly, getWorkday, isWeekend, toDateOnly } from "../../utils/date";
+import {
+  calculateWorkingHours,
+  countWeekdaysInRange,
+  getTodayDateOnly,
+  getWorkday,
+  isWeekend,
+  monthDateRange,
+  monthKey,
+  toDateOnly,
+} from "../../utils/date";
 import type {
+  AttendanceReportQuery,
   ListAttendanceQuery,
   ListCorrectionsQuery,
   MarkAttendanceInput,
@@ -244,6 +255,141 @@ export async function getAttendanceById(logger: Logger, requester: RequestingUse
 
   log.info({ id }, "Get attendance - completed");
   return attendance;
+}
+
+// ---------------------------------------------------------------------------
+// Monthly attendance report ("download report by month/year"). Employees
+// may only ever pull their own, and only for the past 6 months; Admin/HR
+// may pull ANY user's report with no 6-month cap — the only floor for them
+// is that user's own account-creation month (no attendance can exist before
+// they were created).
+// ---------------------------------------------------------------------------
+
+export interface AttendanceReportRecord {
+  date: string;
+  day: string;
+  status: string;
+  checkInTime: Date | null;
+  checkOutTime: Date | null;
+  workingHours: number | null;
+}
+
+export interface AttendanceReportSummary {
+  totalWeekdays: number;
+  presentDays: number;
+  absentDays: number;
+  holidayDays: number;
+  unmarkedDays: number;
+  totalWorkingHours: number;
+}
+
+export interface AttendanceReport {
+  user: { id: string; firstName: string; lastName: string; email: string };
+  month: number;
+  year: number;
+  summary: AttendanceReportSummary;
+  records: AttendanceReportRecord[];
+}
+
+export async function getAttendanceReport(
+  logger: Logger,
+  requester: RequestingUser,
+  query: AttendanceReportQuery
+): Promise<AttendanceReport> {
+  const log = scopedLogger(logger, LAYER, "getAttendanceReport");
+  log.info(
+    { requesterId: requester.userId, role: requester.role, month: query.month, year: query.year, targetUserId: query.userId },
+    "Get attendance report - processing"
+  );
+
+  if (requester.role === ROLE_NAMES.EMPLOYEE && query.userId && query.userId !== requester.userId) {
+    log.warn({ requesterId: requester.userId, targetUserId: query.userId }, "Get attendance report - forbidden, not own report");
+    throw new ForbiddenError("Employees can only download their own attendance report");
+  }
+
+  const targetUserId = requester.role === ROLE_NAMES.EMPLOYEE ? requester.userId : query.userId ?? requester.userId;
+
+  const targetUser = await userRepository.findById(log, targetUserId);
+  if (!targetUser) {
+    log.warn({ targetUserId }, "Get attendance report - target user not found");
+    throw new NotFoundError("User not found");
+  }
+
+  if (requester.role === ROLE_NAMES.HR && targetUser.id !== requester.userId && targetUser.role?.name !== ROLE_NAMES.EMPLOYEE) {
+    log.warn({ targetUserId }, "Get attendance report - forbidden, HR can only view Employee reports");
+    throw new ForbiddenError("HR can only view Employee attendance reports");
+  }
+
+  const now = new Date();
+  const currentKey = monthKey(now.getUTCFullYear(), now.getUTCMonth() + 1);
+  const requestedKey = monthKey(query.year, query.month);
+
+  if (requestedKey > currentKey) {
+    log.warn({ month: query.month, year: query.year }, "Get attendance report - rejected, future month");
+    throw new BadRequestError("Cannot generate a report for a future month");
+  }
+
+  if (requester.role === ROLE_NAMES.EMPLOYEE) {
+    const earliestAllowedKey = currentKey - 5; // rolling 6-month window: current month + previous 5
+    if (requestedKey < earliestAllowedKey) {
+      log.warn({ month: query.month, year: query.year }, "Get attendance report - rejected, older than 6 months");
+      throw new BadRequestError("You can only download attendance reports for the past 6 months");
+    }
+  } else {
+    const createdAt = targetUser.createdAt;
+    const earliestAllowedKey = monthKey(createdAt.getUTCFullYear(), createdAt.getUTCMonth() + 1);
+    if (requestedKey < earliestAllowedKey) {
+      log.warn({ month: query.month, year: query.year, targetUserId }, "Get attendance report - rejected, before account creation");
+      throw new BadRequestError(
+        `Cannot generate a report before this user's account was created (${createdAt.toISOString().slice(0, 7)})`
+      );
+    }
+  }
+
+  const { start, end } = monthDateRange(query.year, query.month);
+  const rows = await attendanceRepository.findAllForUserInRange(log, targetUserId, start, end);
+
+  const totalWeekdays = countWeekdaysInRange(start, end);
+  let presentDays = 0;
+  let absentDays = 0;
+  let holidayDays = 0;
+  let totalWorkingHours = 0;
+
+  const records: AttendanceReportRecord[] = rows.map((row) => {
+    if (row.status === ATTENDANCE_STATUS.PRESENT) presentDays += 1;
+    else if (row.status === ATTENDANCE_STATUS.ABSENT) absentDays += 1;
+    else if (row.status === ATTENDANCE_STATUS.HOLIDAY) holidayDays += 1;
+    if (row.workingHours) totalWorkingHours += Number(row.workingHours);
+
+    return {
+      date: row.date,
+      day: row.day,
+      status: row.status,
+      checkInTime: row.checkInTime,
+      checkOutTime: row.checkOutTime,
+      workingHours: row.workingHours,
+    };
+  });
+
+  const unmarkedDays = Math.max(totalWeekdays - (presentDays + absentDays + holidayDays), 0);
+
+  const report: AttendanceReport = {
+    user: { id: targetUser.id, firstName: targetUser.firstName, lastName: targetUser.lastName, email: targetUser.email },
+    month: query.month,
+    year: query.year,
+    summary: {
+      totalWeekdays,
+      presentDays,
+      absentDays,
+      holidayDays,
+      unmarkedDays,
+      totalWorkingHours: Math.round(totalWorkingHours * 100) / 100,
+    },
+    records,
+  };
+
+  log.info({ targetUserId, month: query.month, year: query.year, recordCount: records.length }, "Get attendance report - completed");
+  return report;
 }
 
 // ---------------------------------------------------------------------------
@@ -493,14 +639,14 @@ export async function sendAttendanceReminders(logger: Logger): Promise<ReminderR
       continue;
     }
 
+    const employeeName = `${user.firstName} ${user.lastName}`.trim();
     const sent = await sendMail(log, {
       to: user.email,
-      subject: "Reminder: mark your attendance for today",
+      subject: "portal login reminder.",
       text:
-        `Hi ${user.firstName},\n\n` +
-        `This is a reminder to log in and mark your attendance for today (${today}). ` +
-        `If it isn't marked by end of day, you will be automatically recorded as ABSENT.\n\n` +
-        `— Salary Management`,
+        `Hello ${employeeName}\n\n` +
+        `This is a gentle reminder to log into portal and mark your attendance on working days. ` +
+        `Ignore if already done. If any issue you may contact HR team ${env.hrContactEmail}`,
     });
     if (sent) {
       remindersSent += 1;
