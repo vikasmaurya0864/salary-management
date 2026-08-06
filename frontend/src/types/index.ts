@@ -111,11 +111,17 @@ export interface CorrectionRequest {
 
 export interface Permission {
   id: string;
-  userId: string;
+  // Role-scoped only — there is no per-user grant. Anyone CURRENTLY
+  // holding this role gets access, including someone moved into it later.
+  roleId: string;
+  // Audit trail: which admin created this grant (null if unknown / their
+  // account was later removed).
+  createdBy: string | null;
   path: string;
   method: HttpMethod;
   status: PermissionStatus;
-  user?: User;
+  role?: Role;
+  creator?: User;
 }
 
 export interface ApiErrorBody {

@@ -3,6 +3,7 @@ import * as userRepository from "../../repositories/user.repository";
 import * as roleRepository from "../../repositories/role.repository";
 import { ALL_ROLE_NAMES, ROLE_NAMES, type RoleName } from "../../constants/roles";
 import { AppError, BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../../utils/app-error";
+import { buildCacheKey, CACHE_NAMESPACE, invalidateNamespace, withCache } from "../../utils/cache";
 import type { Logger } from "../../utils/logger";
 import { scopedLogger } from "../../utils/scoped-logger";
 import type { AllocateRoleInput, CreateUserInput, ListUsersQuery, UpdateUserInput } from "./user.validation";
@@ -100,6 +101,7 @@ export async function createUser(logger: Logger, creatorRole: RoleName, input: C
   });
 
   user.role = role;
+  await invalidateNamespace(log, CACHE_NAMESPACE.USERS);
   log.info({ id: user.id }, "Create user - completed");
   return user;
 }
@@ -125,7 +127,10 @@ export async function listUsers(
   }
 
   const offset = (query.page - 1) * query.limit;
-  const { rows, count } = await userRepository.findAndCountAll(log, { where, limit: query.limit, offset });
+  const cacheKey = buildCacheKey(CACHE_NAMESPACE.USERS, "list", requester.role, query.page, query.limit);
+  const { rows, count } = await withCache(log, cacheKey, () =>
+    userRepository.findAndCountAll(log, { where, limit: query.limit, offset })
+  );
 
   log.info({ total: count }, "List users - completed");
   return {
@@ -163,24 +168,28 @@ export async function getUserStats(logger: Logger, requester: { role: RoleName }
     throw new ForbiddenError("Only Admin or HR can view user statistics");
   }
 
-  const rolesToInclude: readonly RoleName[] =
-    requester.role === ROLE_NAMES.HR ? [ROLE_NAMES.EMPLOYEE] : ALL_ROLE_NAMES;
+  const stats = await withCache(log, buildCacheKey(CACHE_NAMESPACE.USERS, "stats", requester.role), async () => {
+    const rolesToInclude: readonly RoleName[] =
+      requester.role === ROLE_NAMES.HR ? [ROLE_NAMES.EMPLOYEE] : ALL_ROLE_NAMES;
 
-  const byRole: Partial<Record<RoleName, RoleUserCounts>> = {};
-  let totalActive = 0;
-  let totalInactive = 0;
+    const byRole: Partial<Record<RoleName, RoleUserCounts>> = {};
+    let totalActive = 0;
+    let totalInactive = 0;
 
-  for (const roleName of rolesToInclude) {
-    const role = await roleRepository.findByName(log, roleName);
-    if (!role) continue; // role not seeded yet — report zero rather than failing the whole dashboard
-    const counts = await userRepository.countByRoleActiveState(log, role.id);
-    byRole[roleName] = counts;
-    totalActive += counts.active;
-    totalInactive += counts.inactive;
-  }
+    for (const roleName of rolesToInclude) {
+      const role = await roleRepository.findByName(log, roleName);
+      if (!role) continue; // role not seeded yet — report zero rather than failing the whole dashboard
+      const counts = await userRepository.countByRoleActiveState(log, role.id);
+      byRole[roleName] = counts;
+      totalActive += counts.active;
+      totalInactive += counts.inactive;
+    }
 
-  log.info({ totalActive, totalInactive }, "Get user stats - completed");
-  return { totalActive, totalInactive, byRole };
+    return { totalActive, totalInactive, byRole };
+  });
+
+  log.info({ totalActive: stats.totalActive, totalInactive: stats.totalInactive }, "Get user stats - completed");
+  return stats;
 }
 
 async function findUserOrThrow(logger: Logger, id: string): Promise<User> {
@@ -195,7 +204,10 @@ export async function getUserById(logger: Logger, requester: RequestingUser, id:
   const log = scopedLogger(logger, LAYER, "getUserById");
   log.info({ id }, "Get user - processing");
 
-  const user = await findUserOrThrow(log, id);
+  // Cached by id only (not by requester) — the underlying record is the
+  // same for everyone; `assertCanAccessTarget` still runs on every call
+  // (cached or not) so authorization is never skipped.
+  const user = await withCache(log, buildCacheKey(CACHE_NAMESPACE.USERS, "byId", id), () => findUserOrThrow(log, id));
   assertCanAccessTarget(requester, user);
 
   log.info({ id }, "Get user - completed");
@@ -221,6 +233,7 @@ export async function updateUser(
   if (input.password !== undefined) user.password = input.password; // re-hashed by the model's beforeUpdate hook
 
   await userRepository.save(log, user);
+  await invalidateNamespace(log, CACHE_NAMESPACE.USERS);
 
   log.info({ id }, "Update user - completed");
   return user;
@@ -254,6 +267,7 @@ export async function allocateRole(
   user.roleId = role.id;
   await userRepository.save(log, user);
   await userRepository.reloadWithRole(log, user);
+  await invalidateNamespace(log, CACHE_NAMESPACE.USERS);
 
   log.info({ id, newRole: input.role }, "Allocate role - completed");
   return user;
@@ -276,5 +290,6 @@ export async function deleteUser(logger: Logger, requester: RequestingUser, id: 
   }
 
   await userRepository.softDelete(log, user);
+  await invalidateNamespace(log, CACHE_NAMESPACE.USERS);
   log.info({ id }, "Delete user - completed");
 }

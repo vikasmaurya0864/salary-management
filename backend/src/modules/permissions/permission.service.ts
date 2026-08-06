@@ -1,97 +1,58 @@
 import type { Permission } from "../../models";
 import * as permissionRepository from "../../repositories/permission.repository";
-import * as userRepository from "../../repositories/user.repository";
 import * as roleRepository from "../../repositories/role.repository";
 import type { HttpMethod } from "../../constants/permission";
+import type { RoleName } from "../../constants/roles";
 import { ConflictError, NotFoundError } from "../../utils/app-error";
+import { buildCacheKey, CACHE_NAMESPACE, invalidateNamespace, withCache } from "../../utils/cache";
 import type { Logger } from "../../utils/logger";
 import { scopedLogger } from "../../utils/scoped-logger";
-import type {
-  BulkCreatePermissionByRoleInput,
-  CreatePermissionInput,
-  ListPermissionsQuery,
-  UpdatePermissionInput,
-} from "./permission.validation";
+import type { CreatePermissionInput, ListPermissionsQuery, UpdatePermissionInput } from "./permission.validation";
 
 const LAYER = "PermissionService";
 
-export async function createPermission(logger: Logger, input: CreatePermissionInput): Promise<Permission> {
-  const log = scopedLogger(logger, LAYER, "createPermission");
-  log.info({ userId: input.userId, path: input.path, method: input.method }, "Create permission - processing");
-
-  const user = await userRepository.findById(log, input.userId);
-  if (!user) {
-    throw new NotFoundError("User not found");
-  }
-
-  const existing = await permissionRepository.findByUserPathMethod(log, input.userId, input.path, input.method);
-  if (existing) {
-    log.warn({ userId: input.userId, path: input.path, method: input.method }, "Create permission - grant already exists");
-    throw new ConflictError(`A grant for ${input.method} ${input.path} already exists for this user`);
-  }
-
-  const permission = await permissionRepository.create(log, {
-    userId: input.userId,
-    path: input.path,
-    method: input.method,
-    status: input.status,
-  });
-
-  log.info({ id: permission.id }, "Create permission - completed");
-  return permission;
-}
-
-export interface BulkCreatePermissionByRoleResult {
-  role: string;
-  path: string;
-  method: HttpMethod;
-  totalUsers: number;
-  created: number;
-  alreadyGranted: number;
-}
-
 /**
- * "Select a role, grant a permission" flow: instead of picking one user id
- * at a time, this grants the same path+method to every user currently
- * holding the given role. Users that already have a grant for this exact
- * path+method are left untouched (reported as `alreadyGranted`, not an error).
+ * "Select a role, grant a permission" — the only way permissions are
+ * created. A single row covers every user CURRENTLY holding that role,
+ * plus anyone moved into it later (see `hasAccess`), so there's nothing to
+ * fan out per user and nothing to re-grant when someone's role changes.
+ *
+ * `createdById` is the acting requester's own id, taken from their
+ * authenticated session (`request.user.userId`) by the controller — NEVER
+ * from the request body — since only Admins can reach this endpoint today
+ * (see `permission.routes.ts`), it's effectively always "the admin who
+ * granted this".
  */
-export async function createPermissionsForRole(
+export async function createPermission(
   logger: Logger,
-  input: BulkCreatePermissionByRoleInput
-): Promise<BulkCreatePermissionByRoleResult> {
-  const log = scopedLogger(logger, LAYER, "createPermissionsForRole");
-  log.info({ role: input.role, path: input.path, method: input.method }, "Bulk create permissions by role - processing");
+  input: CreatePermissionInput,
+  createdById: string
+): Promise<Permission> {
+  const log = scopedLogger(logger, LAYER, "createPermission");
+  log.info({ role: input.role, path: input.path, method: input.method, createdBy: createdById }, "Create permission - processing");
 
   const role = await roleRepository.findByName(log, input.role);
   if (!role) {
     throw new NotFoundError(`Role '${input.role}' not found`);
   }
 
-  const userIds = await userRepository.findIdsByRoleId(log, role.id);
-
-  let created = 0;
-  let alreadyGranted = 0;
-  for (const userId of userIds) {
-    const existing = await permissionRepository.findByUserPathMethod(log, userId, input.path, input.method);
-    if (existing) {
-      alreadyGranted += 1;
-      continue;
-    }
-    await permissionRepository.create(log, {
-      userId,
-      path: input.path,
-      method: input.method,
-      status: input.status,
-    });
-    created += 1;
+  const existing = await permissionRepository.findByRolePathMethod(log, role.id, input.path, input.method);
+  if (existing) {
+    log.warn({ role: input.role, path: input.path, method: input.method }, "Create permission - grant already exists");
+    throw new ConflictError(`A grant for ${input.method} ${input.path} already exists for role ${input.role}`);
   }
 
-  log.info(
-    { role: input.role, totalUsers: userIds.length, created, alreadyGranted },
-    "Bulk create permissions by role - completed"
-  );
-  return { role: input.role, path: input.path, method: input.method, totalUsers: userIds.length, created, alreadyGranted };
+  const permission = await permissionRepository.create(log, {
+    roleId: role.id,
+    createdBy: createdById,
+    path: input.path,
+    method: input.method,
+    status: input.status,
+  });
+  await invalidateNamespace(log, CACHE_NAMESPACE.PERMISSIONS);
+
+  log.info({ id: permission.id, role: input.role }, "Create permission - completed");
+  return permission;
 }
 
 export interface PaginatedPermissions {
@@ -101,13 +62,16 @@ export interface PaginatedPermissions {
 
 export async function listPermissions(logger: Logger, query: ListPermissionsQuery): Promise<PaginatedPermissions> {
   const log = scopedLogger(logger, LAYER, "listPermissions");
-  log.info({ userId: query.userId, page: query.page }, "List permissions - processing");
+  log.info({ roleId: query.roleId, page: query.page }, "List permissions - processing");
 
   const where: Record<string, unknown> = {};
-  if (query.userId) where.userId = query.userId;
+  if (query.roleId) where.roleId = query.roleId;
 
   const offset = (query.page - 1) * query.limit;
-  const { rows, count } = await permissionRepository.findAndCountAll(log, { where, limit: query.limit, offset });
+  const cacheKey = buildCacheKey(CACHE_NAMESPACE.PERMISSIONS, "list", query.page, query.limit, query.roleId);
+  const { rows, count } = await withCache(log, cacheKey, () =>
+    permissionRepository.findAndCountAll(log, { where, limit: query.limit, offset })
+  );
 
   log.info({ total: count }, "List permissions - completed");
   return {
@@ -128,7 +92,11 @@ export async function getPermissionById(logger: Logger, id: string): Promise<Per
   const log = scopedLogger(logger, LAYER, "getPermissionById");
   log.info({ id }, "Get permission - processing");
 
-  const permission = await findPermissionOrThrow(log, id);
+  // Cached at this public-read layer only — `updatePermission`/`deletePermission`
+  // call `findPermissionOrThrow` directly so they always mutate a live row.
+  const permission = await withCache(log, buildCacheKey(CACHE_NAMESPACE.PERMISSIONS, "byId", id), () =>
+    findPermissionOrThrow(log, id)
+  );
 
   log.info({ id }, "Get permission - completed");
   return permission;
@@ -147,10 +115,10 @@ export async function updatePermission(
   const nextPath = input.path ?? permission.path;
   const nextMethod = input.method ?? permission.method;
   if (nextPath !== permission.path || nextMethod !== permission.method) {
-    const existing = await permissionRepository.findByUserPathMethod(log, permission.userId, nextPath, nextMethod);
+    const existing = await permissionRepository.findByRolePathMethod(log, permission.roleId, nextPath, nextMethod);
     if (existing && existing.id !== permission.id) {
       log.warn({ id, path: nextPath, method: nextMethod }, "Update permission - grant already exists");
-      throw new ConflictError(`A grant for ${nextMethod} ${nextPath} already exists for this user`);
+      throw new ConflictError(`A grant for ${nextMethod} ${nextPath} already exists for this role`);
     }
     permission.path = nextPath;
     permission.method = nextMethod;
@@ -161,6 +129,7 @@ export async function updatePermission(
   }
 
   await permissionRepository.save(log, permission);
+  await invalidateNamespace(log, CACHE_NAMESPACE.PERMISSIONS);
 
   log.info({ id }, "Update permission - completed");
   return permission;
@@ -172,21 +141,29 @@ export async function deletePermission(logger: Logger, id: string): Promise<void
 
   const permission = await findPermissionOrThrow(log, id);
   await permissionRepository.hardDelete(log, permission);
+  await invalidateNamespace(log, CACHE_NAMESPACE.PERMISSIONS);
 
   log.info({ id }, "Delete permission - completed");
 }
 
 /**
  * The actual access-control decision, called by the `checkPermission`
- * middleware on every guarded request: does this user have an ACTIVE grant
- * for this exact route pattern + HTTP method?
+ * middleware on every guarded request: does the role the requester
+ * CURRENTLY holds have an ACTIVE grant for this exact route pattern + HTTP
+ * method?
  */
-export async function hasAccess(logger: Logger, userId: string, path: string, method: HttpMethod): Promise<boolean> {
+export async function hasAccess(logger: Logger, roleName: RoleName, path: string, method: HttpMethod): Promise<boolean> {
   const log = scopedLogger(logger, LAYER, "hasAccess");
-  log.info({ userId, path, method }, "Check access - processing");
+  log.info({ role: roleName, path, method }, "Check access - processing");
 
-  const grant = await permissionRepository.findActiveGrant(log, userId, path, method);
+  // Cached (invalidated whenever any role is created/renamed/deleted) so
+  // resolving "role name -> role id" doesn't cost a query on every request.
+  const role = await withCache(log, buildCacheKey(CACHE_NAMESPACE.ROLES, "byName", roleName), () =>
+    roleRepository.findByName(log, roleName)
+  );
 
-  log.info({ userId, path, method, allowed: Boolean(grant) }, "Check access - completed");
+  const grant = role ? await permissionRepository.findActiveGrant(log, role.id, path, method) : null;
+
+  log.info({ role: roleName, path, method, allowed: Boolean(grant) }, "Check access - completed");
   return Boolean(grant);
 }

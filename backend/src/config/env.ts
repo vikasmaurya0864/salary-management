@@ -86,6 +86,18 @@ const envSchema = z.object({
   // Contact address shown in attendance reminder emails ("contact HR team …").
   HR_CONTACT_EMAIL: z.string().email().default("hr@info.in"),
 
+  // ---- Redis (GET-response cache) ----
+  REDIS_HOST: z.string().min(1).default("localhost"),
+  REDIS_PORT: z.coerce.number().int().positive().default(6379),
+  REDIS_PASSWORD: z
+    .string()
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : undefined)),
+  REDIS_DB: z.coerce.number().int().min(0).default(0),
+  // How long a cached list/get-by-id response stays valid before it expires
+  // on its own even without an explicit write invalidating it.
+  CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+
   // ---- Cron jobs ----
   // Timezone the 8am/7pm attendance job schedules are interpreted in. Keep
   // this as "UTC" unless `src/utils/date.ts`'s "today"/day-of-week
@@ -144,6 +156,15 @@ export interface EnvConfig {
   adminEmail: string;
   adminPassword: string;
   hrContactEmail: string;
+  redis: {
+    host: string;
+    port: number;
+    password: string | undefined;
+    db: number;
+  };
+  cache: {
+    ttlSeconds: number;
+  };
   smtp: {
     host: string | undefined;
     port: number;
@@ -179,6 +200,15 @@ export const env: Readonly<EnvConfig> = Object.freeze({
   adminEmail: rawEnv.ADMIN_EMAIL,
   adminPassword: rawEnv.ADMIN_PASSWORD,
   hrContactEmail: rawEnv.HR_CONTACT_EMAIL,
+  redis: Object.freeze({
+    host: rawEnv.REDIS_HOST,
+    port: rawEnv.REDIS_PORT,
+    password: rawEnv.REDIS_PASSWORD,
+    db: rawEnv.REDIS_DB,
+  }),
+  cache: Object.freeze({
+    ttlSeconds: rawEnv.CACHE_TTL_SECONDS,
+  }),
   smtp: Object.freeze({
     host: rawEnv.SMTP_HOST,
     port: rawEnv.SMTP_PORT,

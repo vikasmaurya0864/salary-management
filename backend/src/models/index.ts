@@ -9,8 +9,10 @@ import { RefreshToken } from "./refresh-token.model";
 Role.hasMany(User, { foreignKey: "roleId", as: "users" });
 User.belongsTo(Role, { foreignKey: "roleId", as: "role" });
 
-User.hasMany(Permission, { foreignKey: "userId", as: "permissions" });
-Permission.belongsTo(User, { foreignKey: "userId", as: "user" });
+Role.hasMany(Permission, { foreignKey: "roleId", as: "permissions" });
+Permission.belongsTo(Role, { foreignKey: "roleId", as: "role" });
+
+Permission.belongsTo(User, { foreignKey: "createdBy", as: "creator" });
 
 User.hasMany(Attendance, { foreignKey: "userId", as: "attendances" });
 Attendance.belongsTo(User, { foreignKey: "userId", as: "user" });

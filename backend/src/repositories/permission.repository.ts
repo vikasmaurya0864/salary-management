@@ -4,14 +4,16 @@ import type { Logger } from "../utils/logger";
 import { scopedLogger } from "../utils/scoped-logger";
 
 const LAYER = "PermissionRepository";
-// Nests the user's role too — the admin UI groups/labels grants by role,
-// not just by the individual user they happen to be stored against.
-const withUser = {
-  include: [{ model: User, as: "user" as const, include: [{ model: Role, as: "role" as const }] }],
+const withRelations = {
+  include: [
+    { model: Role, as: "role" as const },
+    { model: User, as: "creator" as const },
+  ],
 };
 
 export interface CreatePermissionRow {
-  userId: string;
+  roleId: string;
+  createdBy: string;
   path: string;
   method: HttpMethod;
   status: PermissionStatus;
@@ -23,44 +25,51 @@ export interface FindPermissionsOptions {
   offset?: number;
 }
 
-/** The actual access-control lookup used by the `checkPermission` guard on every request. */
+/**
+ * The actual access-control lookup used by the `checkPermission` guard on
+ * every request: an ACTIVE grant matching the requester's CURRENT role +
+ * this route pattern + HTTP method.
+ */
 export async function findActiveGrant(
   logger: Logger,
-  userId: string,
+  roleId: string,
   path: string,
   method: HttpMethod
 ): Promise<Permission | null> {
   const log = scopedLogger(logger, LAYER, "findActiveGrant");
-  log.info({ userId, path, method }, "Find active grant - querying database");
-  const permission = await Permission.findOne({ where: { userId, path, method, status: "ACTIVE" } });
-  log.info({ userId, path, method, found: Boolean(permission) }, "Find active grant - completed");
+  log.info({ roleId, path, method }, "Find active grant - querying database");
+  const permission = await Permission.findOne({ where: { roleId, path, method, status: "ACTIVE" } });
+  log.info({ roleId, path, method, found: Boolean(permission) }, "Find active grant - completed");
   return permission;
 }
 
-export async function findByUserPathMethod(
+export async function findByRolePathMethod(
   logger: Logger,
-  userId: string,
+  roleId: string,
   path: string,
   method: HttpMethod
 ): Promise<Permission | null> {
-  const log = scopedLogger(logger, LAYER, "findByUserPathMethod");
-  log.info({ userId, path, method }, "Find grant by user/path/method - querying database");
-  const permission = await Permission.findOne({ where: { userId, path, method } });
-  log.info({ userId, path, method, found: Boolean(permission) }, "Find grant by user/path/method - completed");
+  const log = scopedLogger(logger, LAYER, "findByRolePathMethod");
+  log.info({ roleId, path, method }, "Find grant by role/path/method - querying database");
+  const permission = await Permission.findOne({ where: { roleId, path, method } });
+  log.info({ roleId, path, method, found: Boolean(permission) }, "Find grant by role/path/method - completed");
   return permission;
 }
 
 export async function findById(logger: Logger, id: string): Promise<Permission | null> {
   const log = scopedLogger(logger, LAYER, "findById");
   log.info({ id }, "Find permission by id - querying database");
-  const permission = await Permission.findByPk(id, withUser);
+  const permission = await Permission.findByPk(id, withRelations);
   log.info({ id, found: Boolean(permission) }, "Find permission by id - completed");
   return permission;
 }
 
 export async function create(logger: Logger, data: CreatePermissionRow): Promise<Permission> {
   const log = scopedLogger(logger, LAYER, "create");
-  log.info({ userId: data.userId, path: data.path, method: data.method }, "Create permission - inserting into database");
+  log.info(
+    { roleId: data.roleId, createdBy: data.createdBy, path: data.path, method: data.method },
+    "Create permission - inserting into database"
+  );
   const permission = await Permission.create(data);
   log.info({ id: permission.id }, "Create permission - insert completed");
   return permission;
@@ -76,7 +85,7 @@ export async function findAndCountAll(
     where: options.where,
     limit: options.limit,
     offset: options.offset,
-    include: withUser.include,
+    include: withRelations.include,
     order: [["createdAt", "DESC"]],
   });
   log.info({ count: result.count }, "List permissions - query completed");

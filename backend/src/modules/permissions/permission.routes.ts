@@ -4,7 +4,6 @@ import { checkPermission } from "../../middleware/permission-guard";
 import { ROLE_NAMES } from "../../constants/roles";
 import type { IdParams } from "../../types/route.types";
 import {
-  bulkCreatePermissionsByRoleHandler,
   createPermissionHandler,
   deletePermissionHandler,
   getPermissionHandler,
@@ -23,8 +22,6 @@ export async function permissionRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", checkPermission);
 
   app.post("/", createPermissionHandler);
-  // Static path, must be registered before "/:id" below to avoid being matched as an id.
-  app.post("/bulk-by-role", bulkCreatePermissionsByRoleHandler);
   app.get("/", listPermissionsHandler);
   app.get<{ Params: IdParams }>("/:id", getPermissionHandler);
   app.put<{ Params: IdParams }>("/:id", updatePermissionHandler);

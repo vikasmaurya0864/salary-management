@@ -11,8 +11,12 @@ const pathField = z
   .min(1, "path is required")
   .refine((value) => value.startsWith("/"), "path must start with '/'");
 
+const roleField = z.enum([ROLE_NAMES.ADMIN, ROLE_NAMES.HR, ROLE_NAMES.EMPLOYEE]);
+
+// Grants a path+method to a whole ROLE (every user CURRENTLY holding it,
+// and any user later moved into it) — there is no per-user grant.
 export const createPermissionSchema = z.object({
-  userId: z.string().uuid(),
+  role: roleField,
   path: pathField,
   method: z.enum(HTTP_METHODS),
   status: z.enum([PERMISSION_STATUS.ACTIVE, PERMISSION_STATUS.INACTIVE]).default(PERMISSION_STATUS.ACTIVE),
@@ -28,19 +32,9 @@ export const updatePermissionSchema = z
   .refine((data) => Object.keys(data).length > 0, { message: "At least one field must be provided" });
 export type UpdatePermissionInput = z.infer<typeof updatePermissionSchema>;
 
-// Grants the same path+method to every user currently holding a role,
-// instead of picking one user id at a time — the "select a role" flow.
-export const bulkCreatePermissionByRoleSchema = z.object({
-  role: z.enum([ROLE_NAMES.ADMIN, ROLE_NAMES.HR, ROLE_NAMES.EMPLOYEE]),
-  path: pathField,
-  method: z.enum(HTTP_METHODS),
-  status: z.enum([PERMISSION_STATUS.ACTIVE, PERMISSION_STATUS.INACTIVE]).default(PERMISSION_STATUS.ACTIVE),
-});
-export type BulkCreatePermissionByRoleInput = z.infer<typeof bulkCreatePermissionByRoleSchema>;
-
 export const listPermissionsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),
-  userId: z.string().uuid().optional(),
+  roleId: z.string().uuid().optional(),
 });
 export type ListPermissionsQuery = z.infer<typeof listPermissionsQuerySchema>;

@@ -2,6 +2,7 @@ import closeWithGrace from "close-with-grace";
 import { buildApp } from "./app";
 import { env } from "./config/env";
 import { connectDatabase, sequelize } from "./database/sequelize";
+import { checkRedisOnBoot, redis } from "./database/redis";
 import { startCronJobs, stopCronJobs } from "./jobs";
 
 /**
@@ -22,6 +23,10 @@ export async function bootstrap() {
     // `database/sequelize.ts`), so a slow-starting/restarting Postgres
     // recovers on its own instead of the app crashing.
     await connectDatabase(app.log);
+
+    // Best-effort only (never blocks/fails startup) — see `checkRedisOnBoot`.
+    // GET endpoints fall back to querying Postgres directly if Redis is down.
+    await checkRedisOnBoot(app.log);
 
     const address = await app.listen({ port: env.port, host: env.host });
 
@@ -47,6 +52,7 @@ export async function bootstrap() {
         await stopCronJobs(app.log, cronTasks);
         await app.close();
         await sequelize.close();
+        redis.disconnect();
         app.log.info("Server closed. Goodbye!");
       }
     );

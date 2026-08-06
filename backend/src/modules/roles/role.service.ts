@@ -1,6 +1,7 @@
 import type { Role } from "../../models";
 import * as roleRepository from "../../repositories/role.repository";
 import { AppError, ConflictError, NotFoundError } from "../../utils/app-error";
+import { buildCacheKey, CACHE_NAMESPACE, invalidateNamespace, withCache } from "../../utils/cache";
 import type { Logger } from "../../utils/logger";
 import { scopedLogger } from "../../utils/scoped-logger";
 import type { CreateRoleInput, UpdateRoleInput } from "./role.validation";
@@ -18,6 +19,7 @@ export async function createRole(logger: Logger, input: CreateRoleInput): Promis
   }
 
   const role = await roleRepository.create(log, { name: input.name, description: input.description ?? null });
+  await invalidateNamespace(log, CACHE_NAMESPACE.ROLES);
 
   log.info({ id: role.id }, "Create role - completed");
   return role;
@@ -27,7 +29,7 @@ export async function listRoles(logger: Logger): Promise<Role[]> {
   const log = scopedLogger(logger, LAYER, "listRoles");
   log.info("List roles - processing");
 
-  const roles = await roleRepository.findAll(log);
+  const roles = await withCache(log, buildCacheKey(CACHE_NAMESPACE.ROLES, "list"), () => roleRepository.findAll(log));
 
   log.info({ count: roles.length }, "List roles - completed");
   return roles;
@@ -45,7 +47,10 @@ export async function getRoleById(logger: Logger, id: string): Promise<Role> {
   const log = scopedLogger(logger, LAYER, "getRoleById");
   log.info({ id }, "Get role - processing");
 
-  const role = await findRoleOrThrow(log, id);
+  // Cached at this public-read layer only — `findRoleOrThrow` (used by
+  // update/delete below) always hits the repository directly so mutations
+  // work against a live Sequelize instance, never a cached plain object.
+  const role = await withCache(log, buildCacheKey(CACHE_NAMESPACE.ROLES, "byId", id), () => findRoleOrThrow(log, id));
 
   log.info({ id }, "Get role - completed");
   return role;
@@ -71,6 +76,7 @@ export async function updateRole(logger: Logger, id: string, input: UpdateRoleIn
   }
 
   await roleRepository.save(log, role);
+  await invalidateNamespace(log, CACHE_NAMESPACE.ROLES);
 
   log.info({ id }, "Update role - completed");
   return role;
@@ -93,5 +99,6 @@ export async function deleteRole(logger: Logger, id: string): Promise<void> {
   }
 
   await roleRepository.softDelete(log, role);
+  await invalidateNamespace(log, CACHE_NAMESPACE.ROLES);
   log.info({ id }, "Delete role - completed");
 }

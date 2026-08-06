@@ -34,7 +34,7 @@ export async function checkPermission(request: FastifyRequest, reply: FastifyRep
   const path = request.routeOptions.url ?? request.url;
   const method = request.method as HttpMethod;
 
-  const allowed = await permissionService.hasAccess(log, request.user.userId, path, method);
+  const allowed = await permissionService.hasAccess(log, request.user.role, path, method);
   if (allowed) {
     log.info({ userId: request.user.userId, path, method }, "Check permission - granted");
     return;

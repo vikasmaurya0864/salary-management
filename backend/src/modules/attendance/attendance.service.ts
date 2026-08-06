@@ -8,6 +8,7 @@ import { ROLE_NAMES, type RoleName } from "../../constants/roles";
 import { ATTENDANCE_STATUS, CORRECTION_STATUS } from "../../constants/attendance";
 import { env } from "../../config/env";
 import { AppError, BadRequestError, ForbiddenError, NotFoundError } from "../../utils/app-error";
+import { buildCacheKey, CACHE_NAMESPACE, invalidateNamespace, withCache } from "../../utils/cache";
 import type { Logger } from "../../utils/logger";
 import { scopedLogger } from "../../utils/scoped-logger";
 import { sendMail } from "../../utils/mailer";
@@ -66,6 +67,17 @@ export async function markAttendance(
   input: MarkAttendanceInput
 ): Promise<Attendance> {
   const log = scopedLogger(logger, LAYER, "markAttendance");
+  const attendance = await markAttendanceAndPersist(log, requester, input);
+  // Single invalidation point regardless of which branch below wrote the row.
+  await invalidateNamespace(log, CACHE_NAMESPACE.ATTENDANCE);
+  return attendance;
+}
+
+async function markAttendanceAndPersist(
+  log: Logger,
+  requester: RequestingUser,
+  input: MarkAttendanceInput
+): Promise<Attendance> {
   log.info({ userId: requester.userId, date: input.date }, "Mark attendance - processing");
 
   const today = getTodayDateOnly();
@@ -219,7 +231,20 @@ export async function listAttendance(
 
   const where = await buildAttendanceWhere(log, requester, query);
   const offset = (query.page - 1) * query.limit;
-  const { rows, count } = await attendanceRepository.findAndCountAll(log, { where, limit: query.limit, offset });
+  const cacheKey = buildCacheKey(
+    CACHE_NAMESPACE.ATTENDANCE,
+    "list",
+    requester.role,
+    requester.userId,
+    query.page,
+    query.limit,
+    query.date,
+    query.status,
+    query.userId
+  );
+  const { rows, count } = await withCache(log, cacheKey, () =>
+    attendanceRepository.findAndCountAll(log, { where, limit: query.limit, offset })
+  );
 
   log.info({ total: count }, "List attendance - completed");
   return {
@@ -250,7 +275,9 @@ export async function getAttendanceById(logger: Logger, requester: RequestingUse
   const log = scopedLogger(logger, LAYER, "getAttendanceById");
   log.info({ id }, "Get attendance - processing");
 
-  const attendance = await findAttendanceOrThrow(log, id);
+  const attendance = await withCache(log, buildCacheKey(CACHE_NAMESPACE.ATTENDANCE, "byId", id), () =>
+    findAttendanceOrThrow(log, id)
+  );
   assertCanAccessAttendance(requester, attendance);
 
   log.info({ id }, "Get attendance - completed");
@@ -463,6 +490,7 @@ export async function requestCorrection(
     reason: input.reason,
   });
 
+  await invalidateNamespace(log, CACHE_NAMESPACE.CORRECTIONS);
   log.info({ id: request.id }, "Request correction - completed, pending review");
   return request;
 }
@@ -493,7 +521,18 @@ export async function listCorrectionRequests(
   // ADMIN sees all.
 
   const offset = (query.page - 1) * query.limit;
-  const { rows, count } = await correctionRepository.findAndCountAll(log, { where, limit: query.limit, offset });
+  const cacheKey = buildCacheKey(
+    CACHE_NAMESPACE.CORRECTIONS,
+    "list",
+    requester.role,
+    requester.userId,
+    query.page,
+    query.limit,
+    query.status
+  );
+  const { rows, count } = await withCache(log, cacheKey, () =>
+    correctionRepository.findAndCountAll(log, { where, limit: query.limit, offset })
+  );
 
   log.info({ total: count }, "List correction requests - completed");
   return {
@@ -528,7 +567,9 @@ export async function getCorrectionById(
   const log = scopedLogger(logger, LAYER, "getCorrectionById");
   log.info({ id }, "Get correction request - processing");
 
-  const request = await findCorrectionOrThrow(log, id);
+  const request = await withCache(log, buildCacheKey(CACHE_NAMESPACE.CORRECTIONS, "byId", id), () =>
+    findCorrectionOrThrow(log, id)
+  );
   assertCanAccessCorrection(requester, request);
 
   log.info({ id }, "Get correction request - completed");
@@ -596,6 +637,11 @@ export async function reviewCorrectionRequest(
   }
 
   await correctionRepository.save(log, request);
+  await invalidateNamespace(log, CACHE_NAMESPACE.CORRECTIONS);
+  if (input.action === "APPROVE") {
+    // Approval is the only path that writes into `attendances` from here.
+    await invalidateNamespace(log, CACHE_NAMESPACE.ATTENDANCE);
+  }
   log.info({ id, status: request.status }, "Review correction request - completed");
   return request;
 }
@@ -723,6 +769,10 @@ export async function autoMarkAbsentees(logger: Logger): Promise<AutoAbsenceRunR
     if (!sent) {
       notificationsFailed += 1;
     }
+  }
+
+  if (markedAbsent > 0) {
+    await invalidateNamespace(log, CACHE_NAMESPACE.ATTENDANCE);
   }
 
   const result = { totalActiveUsers: users.length, alreadyMarked, markedAbsent, notificationsFailed };

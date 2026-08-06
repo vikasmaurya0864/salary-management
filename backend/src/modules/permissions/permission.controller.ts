@@ -1,10 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import {
-  bulkCreatePermissionByRoleSchema,
-  createPermissionSchema,
-  listPermissionsQuerySchema,
-  updatePermissionSchema,
-} from "./permission.validation";
+import { createPermissionSchema, listPermissionsQuerySchema, updatePermissionSchema } from "./permission.validation";
 import * as permissionService from "./permission.service";
 import { sendValidationError } from "../../utils/validation";
 import { successResponse } from "../../utils/response";
@@ -22,23 +17,9 @@ export async function createPermissionHandler(request: FastifyRequest, reply: Fa
     return sendValidationError(reply, parsed.error);
   }
 
-  const permission = await permissionService.createPermission(log, parsed.data);
+  const permission = await permissionService.createPermission(log, parsed.data, request.user.userId);
   log.info({ id: permission.id }, "Create permission - request completed");
   return reply.status(201).send(successResponse(permission));
-}
-
-export async function bulkCreatePermissionsByRoleHandler(request: FastifyRequest, reply: FastifyReply) {
-  const log = scopedLogger(request.log, LAYER, "bulkCreatePermissionsByRoleHandler");
-  log.info("Bulk create permissions by role - request received");
-
-  const parsed = bulkCreatePermissionByRoleSchema.safeParse(request.body);
-  if (!parsed.success) {
-    return sendValidationError(reply, parsed.error);
-  }
-
-  const result = await permissionService.createPermissionsForRole(log, parsed.data);
-  log.info({ role: result.role, created: result.created }, "Bulk create permissions by role - request completed");
-  return reply.status(201).send(successResponse(result));
 }
 
 export async function listPermissionsHandler(request: FastifyRequest, reply: FastifyReply) {

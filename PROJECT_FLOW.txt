@@ -7,9 +7,9 @@
 This file tracks everything that has been BUILT so far, in the order it was
 built. Update this list whenever new functionality is added.
 
-NOTE: No database migrations or seeders have been RUN yet. All tables,
-associations and seed data exist only as code (models + migration/seeder
-files) pending explicit go-ahead to run them against Postgres.
+NOTE: All migrations have been run against Postgres (roles, users,
+permissions, attendances, attendance_correction_requests, refresh_tokens).
+Seeder has been run too (ADMIN/HR/EMPLOYEE roles + one bootstrap admin user).
 
 
 -------------------------------------------------------------------------------
@@ -38,7 +38,7 @@ files) pending explicit go-ahead to run them against Postgres.
 [DONE] Auth gateway order on protected /api/* routes:
        1) X-API-Key (portal/client gate)
        2) JWT access token verification (`app.authenticate`)
-       3) Per-user permission grant (`checkPermission`) — Admin bypasses
+       3) Permission grant on the user's CURRENT role (`checkPermission`) — Admin bypasses
 [DONE] JWT access tokens (src/plugins/jwt.ts, src/utils/token.ts)
        - SHORT-LIVED: default 15 minutes (`JWT_ACCESS_TOKEN_TTL_SECONDS=900`)
        - Expired access tokens return 401 with code TOKEN_EXPIRED so a
@@ -53,11 +53,15 @@ files) pending explicit go-ahead to run them against Postgres.
        - `requireRole(...roles)` preHandler restricts a route to specific roles
 [DONE] Role-based access control - fine-grained tier (inside each *.service.ts)
        - e.g. "HR can only manage Employee records", "cannot delete own account"
-[DONE] Per-user, per-endpoint permission system (src/middleware/permission-guard.ts)
-       - `permissions` table: id, userId, path (route pattern e.g. /api/users/:id),
-         method (GET/POST/PUT/PATCH/DELETE), status (ACTIVE/INACTIVE)
-       - `checkPermission` middleware runs after app.authenticate: looks up an
-         ACTIVE grant for (current user, route pattern, HTTP method); 403 if none
+[DONE] Per-role, per-endpoint permission system (src/middleware/permission-guard.ts)
+       - `permissions` table: id, roleId (required, no userId at all), path
+         (route pattern e.g. /api/users/:id), method (GET/POST/PUT/PATCH/DELETE),
+         status (ACTIVE/INACTIVE)
+       - `checkPermission` middleware runs after app.authenticate: resolves the
+         requester's CURRENT role from their JWT, then looks up an ACTIVE grant
+         for (that roleId, route pattern, HTTP method); 403 if none. Matching by
+         current role (not a per-user snapshot) is what lets a role change take
+         effect immediately, with nothing to re-grant.
        - ADMIN role always bypasses this check (prevents total lockout)
        - Wired into users / roles / attendance / permissions routes
 
@@ -92,17 +96,16 @@ files) pending explicit go-ahead to run them against Postgres.
 [DONE] Connection pooling configured
 [DONE] Infinite connection retry: retries every 5 seconds until Postgres is reachable
 [DONE] sequelize-cli wired up (.sequelizerc, src/database/config/config.cjs)
-[DONE] Migrations written (NOT yet run):
+[DONE] Migrations written AND run (all `up` per `db:migrate:status`):
        - create-roles
        - create-users
        - create-permissions (per-user endpoint grants)
        - create-attendances
        - create-attendance-correction-requests
        - create-refresh-tokens
-[DONE] Seeder written (NOT yet run):
+[DONE] Seeder written and run:
        - Seeds ADMIN / HR / EMPLOYEE roles
        - Seeds one bootstrap admin user (credentials from .env)
-[PENDING - awaiting go-ahead] Actually running `npm run db:migrate` + `npm run db:seed`
 
 
 -------------------------------------------------------------------------------
@@ -179,15 +182,26 @@ files) pending explicit go-ahead to run them against Postgres.
 -------------------------------------------------------------------------------
 8. PERMISSION MANAGEMENT  (src/modules/permissions/)
 -------------------------------------------------------------------------------
-[DONE] Permission model (src/models/permission.model.ts) - per-user, per-endpoint
-       access grant: { id, userId, path, method, status }
-[DONE] POST   /api/permissions       - grant a user access to an endpoint+method (Admin only)
-[DONE] POST   /api/permissions/bulk-by-role - grant a path+method to EVERY user
-       currently holding a role (ADMIN/HR/EMPLOYEE), instead of one user id
-       at a time (Admin only); users that already have that exact grant are
-       skipped, not errored - response reports { totalUsers, created,
-       alreadyGranted }
-[DONE] GET    /api/permissions       - list grants, optionally filtered by userId (Admin only)
+[DONE] Permission model (src/models/permission.model.ts) - PURELY role-scoped
+       access grant: { id, roleId, createdBy, path, method, status }. There
+       is no userId for WHO the grant applies to at all - a grant is "role
+       X may METHOD PATH", full stop. `checkPermission` resolves the
+       requester's CURRENT role from their JWT and looks up an ACTIVE grant
+       for that role (see `hasAccess` / `findActiveGrant`). This is what
+       makes a role change (e.g. Employee promoted to HR, an "exceptional
+       case") take effect immediately - there's no per-user row tied to the
+       old role to clean up, and nothing to re-grant for the newly-promoted
+       user.
+       - `createdBy` is a separate, REQUIRED audit field: WHO granted it
+         (the acting admin's user id, taken server-side from the
+         authenticated requester - never from the request body). Its FK
+         is ON DELETE RESTRICT, so a user who has created grants can't be
+         hard-deleted while those grants still exist.
+[DONE] POST   /api/permissions       - create a grant for a role: { role,
+       path, method, status } (Admin only); one row covers every user
+       currently holding that role, and anyone moved into it later;
+       createdBy is auto-stamped from the authenticated admin's own id
+[DONE] GET    /api/permissions       - list grants, optionally filtered by roleId (Admin only)
 [DONE] GET    /api/permissions/:id   - get one grant (Admin only)
 [DONE] PUT    /api/permissions/:id   - edit a grant's path/method/status (Admin only)
 [DONE] DELETE /api/permissions/:id   - revoke a grant (Admin only)
@@ -284,10 +298,9 @@ files) pending explicit go-ahead to run them against Postgres.
 -------------------------------------------------------------------------------
 11. STILL TO DO / OPEN ITEMS
 -------------------------------------------------------------------------------
-[ ] Run migrations + seeders against Postgres (awaiting explicit go-ahead)
-[ ] Auto-seed a starter set of permission grants per role when a user is
-    created (currently every HR/Employee has ZERO permission grants until
-    Admin manually creates them via POST /api/permissions)
+[ ] Auto-seed a starter set of permission grants for HR/EMPLOYEE roles
+    (currently both roles have ZERO permission grants until Admin manually
+    creates them via POST /api/permissions)
 [ ] Payroll / compensation module (not started)
 
 
@@ -301,16 +314,62 @@ files) pending explicit go-ahead to run them against Postgres.
 [DONE] Admin dashboard stat cards: total active / inactive users, plus
        active/inactive breakdown per role (Admin/HR/Employee), backed by
        GET /api/users/stats
-[DONE] Permissions page: create form is role-based, not user-based - Role
-       dropdown (ADMIN/HR/EMPLOYEE) + Method + Path + Create button, backed
-       by POST /api/permissions/bulk-by-role (grants every user in that role
-       at once); the grants table below still lists/revokes individual
-       per-user rows (role column added) since storage stays per-user
+[DONE] Permissions page: create form is purely role-based - Role dropdown
+       (ADMIN/HR/EMPLOYEE) + Method + Path + Create button, backed by
+       POST /api/permissions (one row per role, no per-user rows at all);
+       the grants table below lists/revokes those role-scoped rows directly
+       and shows a "Created by" column (the admin who granted it)
 [DONE] HR dashboard (/hr): employees, attendance, corrections, reports, profile
 [DONE] Employee dashboard (/employee): mark attendance, attendance report
        (6 months), edit profile (name/mobile/contact)
 [DONE] Backend CORS enabled (@fastify/cors) for local Vite origin
 [DONE] frontend/.env: VITE_API_BASE_URL, VITE_API_KEY
+
+
+-------------------------------------------------------------------------------
+13. REDIS RESPONSE CACHE  (src/database/redis.ts, src/utils/cache.ts)
+-------------------------------------------------------------------------------
+[DONE] ioredis client (src/database/redis.ts), connected to REDIS_HOST/PORT/
+       PASSWORD/DB from .env (defaults: localhost:6379, db 0)
+[DONE] Treated as a "best effort" dependency, NOT a hard one like Postgres:
+       - Boot only does a non-blocking PING for a startup log line, never
+         fails/delays server startup if Redis is down
+       - Every cache read/write is wrapped in try/catch (src/utils/cache.ts);
+         a Redis failure is logged and treated as a plain cache miss - GET
+         endpoints keep serving correct data straight from Postgres either way
+       - `retryStrategy` keeps trying to reconnect in the background forever
+[DONE] Cache-aside helper `withCache(logger, key, loadFresh, ttl?)`:
+       returns the cached value if present, otherwise calls `loadFresh`
+       (the repository call), caches the result (JSON, default TTL from
+       CACHE_TTL_SECONDS, 300s), and returns it
+[DONE] `invalidateNamespace(logger, namespace)`: SCAN + DEL every key under
+       a namespace prefix (e.g. `cache:users:*`) - called after every
+       create/update/delete so the very NEXT GET call recomputes fresh data
+       instead of serving stale cache (TTL is just the safety net)
+[DONE] Cached (list + get-by-id, plus admin stats where relevant):
+       - Users: GET /api/users, GET /api/users/:id, GET /api/users/stats
+         (cache key includes requester role since HR/Admin see different data)
+       - Roles: GET /api/roles, GET /api/roles/:id
+       - Permissions: GET /api/permissions, GET /api/permissions/:id
+       - Attendance: GET /api/attendance, GET /api/attendance/:id
+       - Corrections: GET /api/attendance/corrections, .../corrections/:id
+       Invalidated on: create/update/delete/allocate-role for users; create/
+       update/delete for roles; create/update/delete for permissions;
+       mark-attendance + correction-approval + the 7pm auto-absence cron
+       job for attendance; raise/review for corrections
+[NOT CACHED, intentionally]
+       - `hasAccess` (the per-request permission check in
+         permission-guard.ts) — this runs on literally every guarded
+         request, and correctness there matters more than the speedup;
+         kept always-real-time against the database
+       - GET /api/attendance/report — high-cardinality (month/year/user)
+         and rarely requested twice in a row; not worth the cache-key complexity
+[DONE] Mutation helpers that share a lookup with a public GET (e.g.
+       `findRoleOrThrow`, `findUserOrThrow`, `findPermissionOrThrow`,
+       `findAttendanceOrThrow`, `findCorrectionOrThrow`) are NEVER cached —
+       only the public read functions (`getRoleById`, `getUserById`, ...)
+       wrap them in `withCache`, so update/delete always mutate a live
+       Sequelize row, never a cached plain object
 
 
 ===============================================================================

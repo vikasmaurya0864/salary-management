@@ -4,42 +4,28 @@ import { apiRequest } from "./client";
 export function listPermissions(params: {
   page?: number;
   limit?: number;
-  userId?: string;
+  roleId?: string;
 } = {}): Promise<Paginated<Permission>> {
   const q = new URLSearchParams();
   if (params.page) q.set("page", String(params.page));
   if (params.limit) q.set("limit", String(params.limit));
-  if (params.userId) q.set("userId", params.userId);
+  if (params.roleId) q.set("roleId", params.roleId);
   const query = q.toString();
   return apiRequest(`/api/permissions${query ? `?${query}` : ""}`);
 }
 
+/**
+ * Grants a path + method to an entire ROLE in one row — every user
+ * currently holding (or later moved into) that role is covered
+ * automatically, since access checks match the requester's current role.
+ */
 export function createPermission(input: {
-  userId: string;
+  role: RoleName;
   path: string;
   method: HttpMethod;
   status?: PermissionStatus;
 }): Promise<Permission> {
   return apiRequest("/api/permissions", { method: "POST", body: input });
-}
-
-export interface BulkPermissionResult {
-  role: RoleName;
-  path: string;
-  method: HttpMethod;
-  totalUsers: number;
-  created: number;
-  alreadyGranted: number;
-}
-
-/** Grants the same path + method to every user currently holding `role`, instead of one user at a time. */
-export function createPermissionsForRole(input: {
-  role: RoleName;
-  path: string;
-  method: HttpMethod;
-  status?: PermissionStatus;
-}): Promise<BulkPermissionResult> {
-  return apiRequest("/api/permissions/bulk-by-role", { method: "POST", body: input });
 }
 
 export function updatePermission(

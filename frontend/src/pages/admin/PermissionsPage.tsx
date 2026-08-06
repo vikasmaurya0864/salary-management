@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { createPermissionsForRole, deletePermission, listPermissions } from "../../api/permissions";
+import { createPermission, deletePermission, listPermissions } from "../../api/permissions";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { Loading } from "../../components/Loading";
 import { PageHeader } from "../../components/PageHeader";
@@ -55,15 +55,14 @@ export function PermissionsPage() {
     setError(null);
     setSuccess(null);
     try {
-      const result = await createPermissionsForRole({
+      await createPermission({
         role: form.role,
         path: form.path,
         method: form.method,
         status: "ACTIVE",
       });
       setSuccess(
-        `Granted ${result.method} ${result.path} to ${result.created} of ${result.totalUsers} ${result.role} user(s)` +
-          (result.alreadyGranted ? ` (${result.alreadyGranted} already had it).` : ".")
+        `Granted ${form.method} ${form.path} to every ${form.role} user — including anyone moved into ${form.role} later.`
       );
       await load();
     } catch (err) {
@@ -125,23 +124,23 @@ export function PermissionsPage() {
             <thead>
               <tr>
                 <th>Role</th>
-                <th>User</th>
                 <th>Method</th>
                 <th>Path</th>
                 <th>Status</th>
+                <th>Created by</th>
                 <th />
               </tr>
             </thead>
             <tbody>
               {items.map((p) => (
                 <tr key={p.id}>
-                  <td>{p.user?.role?.name ?? "—"}</td>
-                  <td>{p.user ? `${p.user.firstName} ${p.user.lastName}` : p.userId}</td>
+                  <td>{p.role?.name ?? "—"}</td>
                   <td>{p.method}</td>
                   <td>
                     <code>{p.path}</code>
                   </td>
                   <td>{p.status}</td>
+                  <td>{p.creator ? `${p.creator.firstName} ${p.creator.lastName}` : "—"}</td>
                   <td>
                     <button
                       type="button"
