@@ -1,10 +1,14 @@
-import { Permission, User } from "../models";
+import { Permission, Role, User } from "../models";
 import type { HttpMethod, PermissionStatus } from "../constants/permission";
 import type { Logger } from "../utils/logger";
 import { scopedLogger } from "../utils/scoped-logger";
 
 const LAYER = "PermissionRepository";
-const withUser = { include: [{ model: User, as: "user" as const }] };
+// Nests the user's role too — the admin UI groups/labels grants by role,
+// not just by the individual user they happen to be stored against.
+const withUser = {
+  include: [{ model: User, as: "user" as const, include: [{ model: Role, as: "role" as const }] }],
+};
 
 export interface CreatePermissionRow {
   userId: string;

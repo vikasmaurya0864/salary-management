@@ -92,6 +92,36 @@ export async function findAllActive(logger: Logger): Promise<User[]> {
   return users;
 }
 
+/** Count of (non-deleted) users currently holding a given role NAME — used to enforce "only one admin account ever" without the caller needing the role's id. */
+export async function countByRoleName(logger: Logger, roleName: string): Promise<number> {
+  const log = scopedLogger(logger, LAYER, "countByRoleName");
+  log.info({ roleName }, "Count users by role name - querying database");
+  const count = await User.count({ include: [{ model: Role, as: "role", where: { name: roleName } }] });
+  log.info({ roleName, count }, "Count users by role name - completed");
+  return count;
+}
+
+export interface RoleUserCounts {
+  active: number;
+  inactive: number;
+}
+
+/**
+ * Active (currently employed) vs inactive (soft-deleted) headcount for one
+ * role — used by the admin dashboard stats endpoint. "Active" is simply
+ * "not soft-deleted" (Sequelize's default `paranoid` scope already excludes
+ * deleted rows); "inactive" is deleted-but-still-in-the-table minus active.
+ */
+export async function countByRoleActiveState(logger: Logger, roleId: string): Promise<RoleUserCounts> {
+  const log = scopedLogger(logger, LAYER, "countByRoleActiveState");
+  log.info({ roleId }, "Count users by role active state - querying database");
+  const active = await User.count({ where: { roleId } });
+  const totalIncludingDeleted = await User.count({ where: { roleId }, paranoid: false });
+  const inactive = totalIncludingDeleted - active;
+  log.info({ roleId, active, inactive }, "Count users by role active state - completed");
+  return { active, inactive };
+}
+
 /** Returns just the ids of users with a given role — used to scope other resources (e.g. attendance) by role without loading full user records. */
 export async function findIdsByRoleId(logger: Logger, roleId: string): Promise<string[]> {
   const log = scopedLogger(logger, LAYER, "findIdsByRoleId");

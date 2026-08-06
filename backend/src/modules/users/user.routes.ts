@@ -8,6 +8,7 @@ import {
   createUserHandler,
   deleteUserHandler,
   getUserHandler,
+  getUserStatsHandler,
   listUsersHandler,
   updateUserHandler,
 } from "./user.controller";
@@ -24,6 +25,8 @@ export async function userRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/", { preHandler: requireRole(ROLE_NAMES.ADMIN, ROLE_NAMES.HR) }, createUserHandler);
   app.get("/", { preHandler: requireRole(ROLE_NAMES.ADMIN, ROLE_NAMES.HR) }, listUsersHandler);
+  // Must be registered before `/:id` — otherwise "stats" would be matched as an :id.
+  app.get("/stats", { preHandler: requireRole(ROLE_NAMES.ADMIN, ROLE_NAMES.HR) }, getUserStatsHandler);
   app.get<{ Params: IdParams }>("/:id", getUserHandler);
   app.put<{ Params: IdParams }>("/:id", updateUserHandler);
   // Dedicated action: Admin allocates the HR (or Employee) role to a user.

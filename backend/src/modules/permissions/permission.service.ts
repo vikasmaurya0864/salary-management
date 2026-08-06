@@ -1,11 +1,17 @@
 import type { Permission } from "../../models";
 import * as permissionRepository from "../../repositories/permission.repository";
 import * as userRepository from "../../repositories/user.repository";
+import * as roleRepository from "../../repositories/role.repository";
 import type { HttpMethod } from "../../constants/permission";
 import { ConflictError, NotFoundError } from "../../utils/app-error";
 import type { Logger } from "../../utils/logger";
 import { scopedLogger } from "../../utils/scoped-logger";
-import type { CreatePermissionInput, ListPermissionsQuery, UpdatePermissionInput } from "./permission.validation";
+import type {
+  BulkCreatePermissionByRoleInput,
+  CreatePermissionInput,
+  ListPermissionsQuery,
+  UpdatePermissionInput,
+} from "./permission.validation";
 
 const LAYER = "PermissionService";
 
@@ -33,6 +39,59 @@ export async function createPermission(logger: Logger, input: CreatePermissionIn
 
   log.info({ id: permission.id }, "Create permission - completed");
   return permission;
+}
+
+export interface BulkCreatePermissionByRoleResult {
+  role: string;
+  path: string;
+  method: HttpMethod;
+  totalUsers: number;
+  created: number;
+  alreadyGranted: number;
+}
+
+/**
+ * "Select a role, grant a permission" flow: instead of picking one user id
+ * at a time, this grants the same path+method to every user currently
+ * holding the given role. Users that already have a grant for this exact
+ * path+method are left untouched (reported as `alreadyGranted`, not an error).
+ */
+export async function createPermissionsForRole(
+  logger: Logger,
+  input: BulkCreatePermissionByRoleInput
+): Promise<BulkCreatePermissionByRoleResult> {
+  const log = scopedLogger(logger, LAYER, "createPermissionsForRole");
+  log.info({ role: input.role, path: input.path, method: input.method }, "Bulk create permissions by role - processing");
+
+  const role = await roleRepository.findByName(log, input.role);
+  if (!role) {
+    throw new NotFoundError(`Role '${input.role}' not found`);
+  }
+
+  const userIds = await userRepository.findIdsByRoleId(log, role.id);
+
+  let created = 0;
+  let alreadyGranted = 0;
+  for (const userId of userIds) {
+    const existing = await permissionRepository.findByUserPathMethod(log, userId, input.path, input.method);
+    if (existing) {
+      alreadyGranted += 1;
+      continue;
+    }
+    await permissionRepository.create(log, {
+      userId,
+      path: input.path,
+      method: input.method,
+      status: input.status,
+    });
+    created += 1;
+  }
+
+  log.info(
+    { role: input.role, totalUsers: userIds.length, created, alreadyGranted },
+    "Bulk create permissions by role - completed"
+  );
+  return { role: input.role, path: input.path, method: input.method, totalUsers: userIds.length, created, alreadyGranted };
 }
 
 export interface PaginatedPermissions {

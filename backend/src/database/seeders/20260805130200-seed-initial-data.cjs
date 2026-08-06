@@ -47,6 +47,17 @@ module.exports = {
       throw new Error("ADMIN_PASSWORD must be set in .env before seeding the bootstrap admin user.");
     }
 
+    // Only one admin account is ever allowed. If this seeder is re-run
+    // after a `db:seed:undo` (possibly with a different ADMIN_EMAIL in
+    // .env), skip creating a second admin instead of silently duplicating it.
+    const [existingAdmins] = await queryInterface.sequelize.query(
+      `SELECT u.id FROM "users" u INNER JOIN "roles" r ON r.id = u."roleId" WHERE r.name = 'ADMIN' LIMIT 1`
+    );
+    if (existingAdmins.length > 0) {
+      console.log("Seed initial data: an ADMIN user already exists — skipping admin user creation.");
+      return;
+    }
+
     const hashedPassword = await bcrypt.hash(process.env.ADMIN_PASSWORD, BCRYPT_SALT_ROUNDS);
 
     await queryInterface.bulkInsert("users", [

@@ -41,6 +41,16 @@ export async function listUsersHandler(request: FastifyRequest, reply: FastifyRe
   );
 }
 
+export async function getUserStatsHandler(request: FastifyRequest, reply: FastifyReply) {
+  const log = scopedLogger(request.log, LAYER, "getUserStatsHandler");
+  log.info("Get user stats - request received");
+
+  const stats = await userService.getUserStats(log, { role: request.user.role });
+
+  log.info({ totalActive: stats.totalActive, totalInactive: stats.totalInactive }, "Get user stats - request completed");
+  return reply.send(successResponse(stats));
+}
+
 export async function getUserHandler(request: FastifyRequest<{ Params: IdParams }>, reply: FastifyReply) {
   const log = scopedLogger(request.log, LAYER, "getUserHandler");
   log.info({ id: request.params.id }, "Get user - request received");

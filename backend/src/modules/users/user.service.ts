@@ -1,7 +1,7 @@
 import type { User } from "../../models";
 import * as userRepository from "../../repositories/user.repository";
 import * as roleRepository from "../../repositories/role.repository";
-import { ROLE_NAMES, type RoleName } from "../../constants/roles";
+import { ALL_ROLE_NAMES, ROLE_NAMES, type RoleName } from "../../constants/roles";
 import { AppError, BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../../utils/app-error";
 import type { Logger } from "../../utils/logger";
 import { scopedLogger } from "../../utils/scoped-logger";
@@ -22,10 +22,29 @@ async function getRoleByNameOrThrow(logger: Logger, name: RoleName) {
   return role;
 }
 
-/** Enforces: nobody creates extra admins; HR may only create Employees. */
-function assertCanAssignRole(creatorRole: RoleName, targetRole: RoleName): void {
+/**
+ * Enforces: at most one ADMIN account may ever exist in the database, and
+ * HR may only create Employees.
+ *
+ * The single admin account is meant to be provisioned exactly once, by the
+ * database seeder (see `20260805130200-seed-initial-data.cjs`) — never
+ * through the API. This is checked with a real COUNT query against the
+ * `users` table (not just a blanket "never allowed") so the rule is
+ * explicit and auditable: if an admin already exists, any attempt to
+ * create or promote another one is rejected with a clear reason.
+ */
+async function assertCanAssignRole(logger: Logger, creatorRole: RoleName, targetRole: RoleName): Promise<void> {
   if (targetRole === ROLE_NAMES.ADMIN) {
-    throw new ForbiddenError("Additional admin accounts cannot be created through the API");
+    const adminCount = await userRepository.countByRoleName(logger, ROLE_NAMES.ADMIN);
+    if (adminCount > 0) {
+      throw new ConflictError(
+        "An admin account already exists. Only one admin account is allowed — additional admin accounts cannot be created through the API."
+      );
+    }
+    // Belt-and-suspenders: even in the (practically unreachable) case no
+    // admin exists yet, the API still refuses — the admin account is only
+    // ever provisioned by the database seeder, never via HTTP.
+    throw new ForbiddenError("Admin accounts can only be provisioned by the database seeder, not through the API");
   }
   if (creatorRole === ROLE_NAMES.ADMIN) {
     return;
@@ -60,7 +79,7 @@ export async function createUser(logger: Logger, creatorRole: RoleName, input: C
   const log = scopedLogger(logger, LAYER, "createUser");
   log.info({ email: input.email, targetRole: input.role }, "Create user - processing");
 
-  assertCanAssignRole(creatorRole, input.role);
+  await assertCanAssignRole(log, creatorRole, input.role);
 
   const existing = await userRepository.findByEmail(log, input.email);
   if (existing) {
@@ -118,6 +137,50 @@ export async function listUsers(
       totalPages: Math.ceil(count / query.limit) || 1,
     },
   };
+}
+
+export interface RoleUserCounts {
+  active: number;
+  inactive: number;
+}
+
+export interface UserStats {
+  totalActive: number;
+  totalInactive: number;
+  byRole: Partial<Record<RoleName, RoleUserCounts>>;
+}
+
+/**
+ * Admin dashboard headcount: active vs inactive (soft-deleted) users,
+ * broken down by role. Admin sees every role; HR is scoped to Employees
+ * only, matching the same visibility rule used everywhere else in this module.
+ */
+export async function getUserStats(logger: Logger, requester: { role: RoleName }): Promise<UserStats> {
+  const log = scopedLogger(logger, LAYER, "getUserStats");
+  log.info({ role: requester.role }, "Get user stats - processing");
+
+  if (requester.role === ROLE_NAMES.EMPLOYEE) {
+    throw new ForbiddenError("Only Admin or HR can view user statistics");
+  }
+
+  const rolesToInclude: readonly RoleName[] =
+    requester.role === ROLE_NAMES.HR ? [ROLE_NAMES.EMPLOYEE] : ALL_ROLE_NAMES;
+
+  const byRole: Partial<Record<RoleName, RoleUserCounts>> = {};
+  let totalActive = 0;
+  let totalInactive = 0;
+
+  for (const roleName of rolesToInclude) {
+    const role = await roleRepository.findByName(log, roleName);
+    if (!role) continue; // role not seeded yet — report zero rather than failing the whole dashboard
+    const counts = await userRepository.countByRoleActiveState(log, role.id);
+    byRole[roleName] = counts;
+    totalActive += counts.active;
+    totalInactive += counts.inactive;
+  }
+
+  log.info({ totalActive, totalInactive }, "Get user stats - completed");
+  return { totalActive, totalInactive, byRole };
 }
 
 async function findUserOrThrow(logger: Logger, id: string): Promise<User> {
@@ -185,7 +248,7 @@ export async function allocateRole(
   }
 
   const user = await findUserOrThrow(log, id);
-  assertCanAssignRole(requester.role, input.role);
+  await assertCanAssignRole(log, requester.role, input.role);
 
   const role = await getRoleByNameOrThrow(log, input.role);
   user.roleId = role.id;
