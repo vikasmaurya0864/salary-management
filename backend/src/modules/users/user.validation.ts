@@ -16,6 +16,9 @@ export const createUserSchema = z.object({
 });
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 
+// Role changes are deliberately NOT part of a profile update — they go
+// through the dedicated "allocate role" endpoint/schema below, which is
+// admin-only and audited/logged as its own distinct action.
 export const updateUserSchema = z
   .object({
     firstName: z.string().trim().min(1).max(100).optional(),
@@ -23,9 +26,6 @@ export const updateUserSchema = z
     password: z.string().min(8).max(100).optional(),
     mobile: z.string().trim().regex(mobileRegex, "Invalid mobile number").optional(),
     address: z.string().trim().max(500).optional(),
-    // Only an ADMIN is permitted to change a user's role — enforced in the
-    // controller, not here, since that depends on who's making the request.
-    role: roleField.optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: "At least one field must be provided" });
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
@@ -35,3 +35,11 @@ export const listUsersQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).default(20),
 });
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
+
+// Only Admin allocates roles, and only to HR or EMPLOYEE — creating
+// additional Admins through the API is never allowed (see
+// `assertCanAssignRole` in `user.service.ts`).
+export const allocateRoleSchema = z.object({
+  role: z.enum([ROLE_NAMES.HR, ROLE_NAMES.EMPLOYEE]),
+});
+export type AllocateRoleInput = z.infer<typeof allocateRoleSchema>;

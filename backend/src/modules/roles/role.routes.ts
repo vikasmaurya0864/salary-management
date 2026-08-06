@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { requireRole } from "../../middleware/rbac";
+import { checkPermission } from "../../middleware/permission-guard";
 import { ROLE_NAMES } from "../../constants/roles";
 import type { IdParams } from "../../types/route.types";
 import {
@@ -17,6 +18,7 @@ import {
  */
 export async function roleRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("preHandler", app.authenticate);
+  app.addHook("preHandler", checkPermission);
 
   app.post("/", { preHandler: requireRole(ROLE_NAMES.ADMIN) }, createRoleHandler);
   app.get("/", { preHandler: requireRole(ROLE_NAMES.ADMIN, ROLE_NAMES.HR) }, listRolesHandler);

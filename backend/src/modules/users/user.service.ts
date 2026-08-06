@@ -1,15 +1,21 @@
-import { Role, User } from "../../models";
+import type { User } from "../../models";
+import * as userRepository from "../../repositories/user.repository";
+import * as roleRepository from "../../repositories/role.repository";
 import { ROLE_NAMES, type RoleName } from "../../constants/roles";
 import { AppError, BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../../utils/app-error";
-import type { CreateUserInput, ListUsersQuery, UpdateUserInput } from "./user.validation";
+import type { Logger } from "../../utils/logger";
+import { scopedLogger } from "../../utils/scoped-logger";
+import type { AllocateRoleInput, CreateUserInput, ListUsersQuery, UpdateUserInput } from "./user.validation";
+
+const LAYER = "UserService";
 
 interface RequestingUser {
   userId: string;
   role: RoleName;
 }
 
-async function getRoleByName(name: RoleName): Promise<Role> {
-  const role = await Role.findOne({ where: { name } });
+async function getRoleByNameOrThrow(logger: Logger, name: RoleName) {
+  const role = await roleRepository.findByName(logger, name);
   if (!role) {
     throw new AppError(`Role '${name}' is not configured. Run the database seeders.`, 500, "ROLE_NOT_CONFIGURED");
   }
@@ -50,17 +56,21 @@ function assertCanAccessTarget(requester: RequestingUser, target: User): void {
   throw new ForbiddenError();
 }
 
-export async function createUser(creatorRole: RoleName, input: CreateUserInput): Promise<User> {
+export async function createUser(logger: Logger, creatorRole: RoleName, input: CreateUserInput): Promise<User> {
+  const log = scopedLogger(logger, LAYER, "createUser");
+  log.info({ email: input.email, targetRole: input.role }, "Create user - processing");
+
   assertCanAssignRole(creatorRole, input.role);
 
-  const existing = await User.findOne({ where: { email: input.email } });
+  const existing = await userRepository.findByEmail(log, input.email);
   if (existing) {
+    log.warn({ email: input.email }, "Create user - email already in use");
     throw new ConflictError("A user with this email already exists");
   }
 
-  const role = await getRoleByName(input.role);
+  const role = await getRoleByNameOrThrow(log, input.role);
 
-  const user = await User.create({
+  const user = await userRepository.create(log, {
     firstName: input.firstName,
     lastName: input.lastName,
     email: input.email,
@@ -71,6 +81,7 @@ export async function createUser(creatorRole: RoleName, input: CreateUserInput):
   });
 
   user.role = role;
+  log.info({ id: user.id }, "Create user - completed");
   return user;
 }
 
@@ -79,24 +90,25 @@ export interface PaginatedUsers {
   pagination: { page: number; limit: number; total: number; totalPages: number };
 }
 
-export async function listUsers(requester: { role: RoleName }, query: ListUsersQuery): Promise<PaginatedUsers> {
+export async function listUsers(
+  logger: Logger,
+  requester: { role: RoleName },
+  query: ListUsersQuery
+): Promise<PaginatedUsers> {
+  const log = scopedLogger(logger, LAYER, "listUsers");
+  log.info({ role: requester.role, page: query.page, limit: query.limit }, "List users - processing");
+
   const where: Record<string, unknown> = {};
 
   if (requester.role === ROLE_NAMES.HR) {
-    const employeeRole = await getRoleByName(ROLE_NAMES.EMPLOYEE);
+    const employeeRole = await getRoleByNameOrThrow(log, ROLE_NAMES.EMPLOYEE);
     where.roleId = employeeRole.id;
   }
 
   const offset = (query.page - 1) * query.limit;
+  const { rows, count } = await userRepository.findAndCountAll(log, { where, limit: query.limit, offset });
 
-  const { rows, count } = await User.findAndCountAll({
-    where,
-    include: [{ model: Role, as: "role" }],
-    limit: query.limit,
-    offset,
-    order: [["createdAt", "DESC"]],
-  });
-
+  log.info({ total: count }, "List users - completed");
   return {
     items: rows,
     pagination: {
@@ -108,54 +120,98 @@ export async function listUsers(requester: { role: RoleName }, query: ListUsersQ
   };
 }
 
-async function findUserOrThrow(id: string): Promise<User> {
-  const user = await User.findByPk(id, { include: [{ model: Role, as: "role" }] });
+async function findUserOrThrow(logger: Logger, id: string): Promise<User> {
+  const user = await userRepository.findById(logger, id);
   if (!user) {
     throw new NotFoundError("User not found");
   }
   return user;
 }
 
-export async function getUserById(requester: RequestingUser, id: string): Promise<User> {
-  const user = await findUserOrThrow(id);
+export async function getUserById(logger: Logger, requester: RequestingUser, id: string): Promise<User> {
+  const log = scopedLogger(logger, LAYER, "getUserById");
+  log.info({ id }, "Get user - processing");
+
+  const user = await findUserOrThrow(log, id);
   assertCanAccessTarget(requester, user);
+
+  log.info({ id }, "Get user - completed");
   return user;
 }
 
-export async function updateUser(requester: RequestingUser, id: string, input: UpdateUserInput): Promise<User> {
-  const user = await findUserOrThrow(id);
-  assertCanAccessTarget(requester, user);
+export async function updateUser(
+  logger: Logger,
+  requester: RequestingUser,
+  id: string,
+  input: UpdateUserInput
+): Promise<User> {
+  const log = scopedLogger(logger, LAYER, "updateUser");
+  log.info({ id }, "Update user - processing");
 
-  if (input.role && input.role !== user.role?.name) {
-    if (requester.role !== ROLE_NAMES.ADMIN) {
-      throw new ForbiddenError("Only an admin can change a user's role");
-    }
-    assertCanAssignRole(requester.role, input.role);
-    const role = await getRoleByName(input.role);
-    user.roleId = role.id;
-  }
+  const user = await findUserOrThrow(log, id);
+  assertCanAccessTarget(requester, user);
 
   if (input.firstName !== undefined) user.firstName = input.firstName;
   if (input.lastName !== undefined) user.lastName = input.lastName;
   if (input.mobile !== undefined) user.mobile = input.mobile;
   if (input.address !== undefined) user.address = input.address;
-  if (input.password !== undefined) user.password = input.password; // re-hashed by the beforeUpdate hook
+  if (input.password !== undefined) user.password = input.password; // re-hashed by the model's beforeUpdate hook
 
-  await user.save();
-  await user.reload({ include: [{ model: Role, as: "role" }] });
+  await userRepository.save(log, user);
+
+  log.info({ id }, "Update user - completed");
   return user;
 }
 
-export async function deleteUser(requester: RequestingUser, id: string): Promise<void> {
-  const user = await findUserOrThrow(id);
+/**
+ * Dedicated "role allocation" action — deliberately separate from
+ * `updateUser` (a plain profile edit) so assigning HR/Employee roles is its
+ * own auditable, admin-only operation, matching how role changes are
+ * granted in the real org (Admin allocates the HR role; HR never touches
+ * roles at all).
+ */
+export async function allocateRole(
+  logger: Logger,
+  requester: RequestingUser,
+  id: string,
+  input: AllocateRoleInput
+): Promise<User> {
+  const log = scopedLogger(logger, LAYER, "allocateRole");
+  log.info({ id, newRole: input.role }, "Allocate role - processing");
+
+  if (requester.role !== ROLE_NAMES.ADMIN) {
+    log.warn({ requesterRole: requester.role }, "Allocate role - forbidden, only admin may allocate roles");
+    throw new ForbiddenError("Only an admin can allocate roles");
+  }
+
+  const user = await findUserOrThrow(log, id);
+  assertCanAssignRole(requester.role, input.role);
+
+  const role = await getRoleByNameOrThrow(log, input.role);
+  user.roleId = role.id;
+  await userRepository.save(log, user);
+  await userRepository.reloadWithRole(log, user);
+
+  log.info({ id, newRole: input.role }, "Allocate role - completed");
+  return user;
+}
+
+export async function deleteUser(logger: Logger, requester: RequestingUser, id: string): Promise<void> {
+  const log = scopedLogger(logger, LAYER, "deleteUser");
+  log.info({ id }, "Delete user - processing");
+
+  const user = await findUserOrThrow(log, id);
   assertCanAccessTarget(requester, user);
 
   if (user.id === requester.userId) {
+    log.warn({ id }, "Delete user - forbidden, cannot delete own account");
     throw new BadRequestError("You cannot delete your own account");
   }
   if (user.role?.name === ROLE_NAMES.ADMIN) {
+    log.warn({ id }, "Delete user - forbidden, cannot delete admin accounts");
     throw new ForbiddenError("Admin accounts cannot be deleted");
   }
 
-  await user.destroy(); // soft delete (paranoid mode)
+  await userRepository.softDelete(log, user);
+  log.info({ id }, "Delete user - completed");
 }

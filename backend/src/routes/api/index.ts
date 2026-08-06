@@ -3,6 +3,8 @@ import { registerApiKeyGuard } from "../../plugins/api-key-guard";
 import { authRoutes } from "../../modules/auth/auth.routes";
 import { userRoutes } from "../../modules/users/user.routes";
 import { roleRoutes } from "../../modules/roles/role.routes";
+import { permissionRoutes } from "../../modules/permissions/permission.routes";
+import { attendanceRoutes } from "../../modules/attendance/attendance.routes";
 
 /**
  * Root plugin for every `/api/*` route. Registered in `app.ts` with
@@ -19,4 +21,6 @@ export async function apiRoutes(app: FastifyInstance): Promise<void> {
   void app.register(authRoutes, { prefix: "/auth" });
   void app.register(userRoutes, { prefix: "/users" });
   void app.register(roleRoutes, { prefix: "/roles" });
+  void app.register(permissionRoutes, { prefix: "/permissions" });
+  void app.register(attendanceRoutes, { prefix: "/attendance" });
 }

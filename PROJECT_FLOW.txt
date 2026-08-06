@@ -1,0 +1,234 @@
+===============================================================================
+ SALARY MANAGEMENT PORTAL - PROJECT FLOW / FUNCTIONALITY LOG
+ Backend: Fastify + TypeScript + PostgreSQL (Sequelize)
+ Last updated: 2026-08-05
+===============================================================================
+
+This file tracks everything that has been BUILT so far, in the order it was
+built. Update this list whenever new functionality is added.
+
+NOTE: No database migrations or seeders have been RUN yet. All tables,
+associations and seed data exist only as code (models + migration/seeder
+files) pending explicit go-ahead to run them against Postgres.
+
+
+-------------------------------------------------------------------------------
+1. CORE SERVER SETUP
+-------------------------------------------------------------------------------
+[DONE] Fastify + TypeScript project bootstrap (src/app.ts, src/server.ts, src/index.ts)
+[DONE] bootstrap() flow: connect DB -> build app -> listen -> graceful shutdown
+[DONE] Global exception / error handler (src/plugins/error-handler.ts)
+       - Consistent JSON error shape: { success:false, error:{message,code,statusCode} }
+       - Catches uncaught exceptions & unhandled promise rejections
+[DONE] Public health check endpoint: GET /health (server status, uptime, env)
+[DONE] Startup logs (pino, pretty-printed in dev, JSON in production)
+[DONE] Hot-reload for development via `tsx watch` (no nodemon needed)
+[DONE] .env based configuration, validated with Zod at boot (src/config/env.ts)
+       - Fails fast with a clear message if required vars are missing/invalid
+[DONE] Windows dev convenience: predev/prestart/stop npm scripts auto-kill
+       whatever is holding port 4000 (via `kill-port`)
+
+
+-------------------------------------------------------------------------------
+2. SECURITY / REQUEST GATEWAY
+-------------------------------------------------------------------------------
+[DONE] `/api` prefix for every backend route (src/routes/api/index.ts)
+[DONE] X-API-Key header guard on every /api/* route (src/plugins/api-key-guard.ts)
+       - Timing-safe comparison against API_KEY env var
+[DONE] JWT auth (src/plugins/jwt.ts, src/utils/token.ts)
+       - Tokens are NON-EXPIRING by design (no `exp` claim, expiresAt: null)
+       - `app.authenticate` preHandler decorator verifies the token and
+         populates request.user = { userId, role }
+[DONE] Role-based access control - coarse tier (src/middleware/rbac.ts)
+       - `requireRole(...roles)` preHandler restricts a route to specific roles
+[DONE] Role-based access control - fine-grained tier (inside each *.service.ts)
+       - e.g. "HR can only manage Employee records", "cannot delete own account"
+[DONE] Per-user, per-endpoint permission system (src/middleware/permission-guard.ts)
+       - `permissions` table: id, userId, path (route pattern e.g. /api/users/:id),
+         method (GET/POST/PUT/PATCH/DELETE), status (ACTIVE/INACTIVE)
+       - `checkPermission` middleware runs after app.authenticate: looks up an
+         ACTIVE grant for (current user, route pattern, HTTP method); 403 if none
+       - ADMIN role always bypasses this check (prevents total lockout)
+       - Wired into users / roles / attendance / permissions routes
+
+
+-------------------------------------------------------------------------------
+3. ARCHITECTURE PATTERN (used by every feature module below)
+-------------------------------------------------------------------------------
+    routes -> controller -> service -> validation (zod) -> repository -> DB
+
+[DONE] Layered folder structure per feature: src/modules/<feature>/
+           <feature>.routes.ts       (Fastify route registration + RBAC)
+           <feature>.controller.ts   (parses request, calls service, sends response)
+           <feature>.service.ts      (business rules / authorization logic)
+           <feature>.validation.ts   (zod schemas for request bodies/queries)
+       src/repositories/<feature>.repository.ts   (all direct Sequelize/DB calls)
+[DONE] Scoped, per-layer logging (src/utils/scoped-logger.ts)
+       - Every function logs with { layer: "<Name>Controller/Service/Repository",
+         fn: "<functionName>" } so a single request can be traced end-to-end,
+         e.g. [UserController] updateUserHandler -> [UserService] updateUser
+         -> [UserRepository] save
+[DONE] Standard success response envelope (src/utils/response.ts):
+         { success: true, data: ... }
+[DONE] Standard validation error envelope (src/utils/validation.ts) via zod
+[DONE] Custom typed app errors (src/utils/app-error.ts):
+         AppError / NotFoundError / ConflictError / ForbiddenError / BadRequestError
+
+
+-------------------------------------------------------------------------------
+4. DATABASE
+-------------------------------------------------------------------------------
+[DONE] PostgreSQL via Sequelize (src/database/sequelize.ts)
+[DONE] Connection pooling configured
+[DONE] Infinite connection retry: retries every 5 seconds until Postgres is reachable
+[DONE] sequelize-cli wired up (.sequelizerc, src/database/config/config.cjs)
+[DONE] Migrations written (NOT yet run):
+       - create-roles
+       - create-users
+       - create-permissions (per-user endpoint grants)
+       - create-attendances
+       - create-attendance-correction-requests
+[DONE] Seeder written (NOT yet run):
+       - Seeds ADMIN / HR / EMPLOYEE roles
+       - Seeds one bootstrap admin user (credentials from .env)
+[PENDING - awaiting go-ahead] Actually running `npm run db:migrate` + `npm run db:seed`
+
+
+-------------------------------------------------------------------------------
+5. USER REGISTRATION & AUTH  (src/modules/auth/)
+-------------------------------------------------------------------------------
+[DONE] POST /api/auth/register  - PUBLIC self-registration
+       - Always creates the account with the EMPLOYEE role (default), even
+         if a different role is requested - only Admin can grant HR/other roles
+[DONE] POST /api/auth/login     - PUBLIC login
+       - Verifies email + bcrypt-hashed password, issues a non-expiring JWT
+[DONE] Passwords hashed with bcrypt (src/utils/password.ts, model hooks on
+       User: beforeCreate / beforeUpdate)
+
+
+-------------------------------------------------------------------------------
+6. USER MANAGEMENT [EMPLOYEES / HR / ADMIN]  (src/modules/users/)
+-------------------------------------------------------------------------------
+[DONE] User model (src/models/user.model.ts)
+       - UUID primary key, unique email, firstName, lastName, password (hashed),
+         mobile, address, roleId (FK -> roles), timestamps, soft delete (paranoid)
+       - toJSON() override strips password from every response
+[DONE] POST   /api/users        - create user (Admin creates HR/Employee, HR creates Employee only)
+[DONE] GET    /api/users        - list users, paginated (Admin sees all, HR sees Employees only)
+[DONE] GET    /api/users/:id    - get one user (scoped: Admin any, HR Employees only, else self)
+[DONE] PUT    /api/users/:id    - update own profile fields (name/mobile/address/password)
+[DONE] PATCH  /api/users/:id/role - Admin-only dedicated role allocation endpoint
+       - Allocating extra ADMIN accounts through the API is always blocked
+[DONE] DELETE /api/users/:id    - soft delete (cannot delete self or an Admin account)
+[DONE] Zod validation on all create/update bodies (email format, password
+       strength, mobile format, etc.)
+
+
+-------------------------------------------------------------------------------
+7. ROLE MANAGEMENT  (src/modules/roles/)
+-------------------------------------------------------------------------------
+[DONE] Role model (src/models/role.model.ts) - UUID PK, unique name, description,
+       soft delete
+[DONE] Canonical roles: ADMIN, HR, EMPLOYEE (src/constants/roles.ts)
+[DONE] POST   /api/roles        - create role (Admin only)
+[DONE] GET    /api/roles        - list roles (Admin, HR)
+[DONE] GET    /api/roles/:id    - get role (Admin, HR)
+[DONE] PUT    /api/roles/:id    - update role (Admin only)
+[DONE] DELETE /api/roles/:id    - soft delete role (Admin only, blocked while
+       any user is still assigned to it)
+
+
+-------------------------------------------------------------------------------
+8. PERMISSION MANAGEMENT  (src/modules/permissions/)
+-------------------------------------------------------------------------------
+[DONE] Permission model (src/models/permission.model.ts) - per-user, per-endpoint
+       access grant: { id, userId, path, method, status }
+[DONE] POST   /api/permissions       - grant a user access to an endpoint+method (Admin only)
+[DONE] GET    /api/permissions       - list grants, optionally filtered by userId (Admin only)
+[DONE] GET    /api/permissions/:id   - get one grant (Admin only)
+[DONE] PUT    /api/permissions/:id   - edit a grant's path/method/status (Admin only)
+[DONE] DELETE /api/permissions/:id   - revoke a grant (Admin only)
+[DONE] `checkPermission` middleware enforces these grants on every guarded
+       request (see section 2) - matches the actual Fastify route PATTERN,
+       not the resolved URL, so one grant covers every resource at that endpoint
+
+
+-------------------------------------------------------------------------------
+9. ATTENDANCE MANAGEMENT  (src/modules/attendance/)
+-------------------------------------------------------------------------------
+[DONE] Attendance model (src/models/attendance.model.ts)
+       - One row per user per calendar date (unique userId+date)
+       - status: PRESENT | ABSENT | HOLIDAY
+       - checkInTime / checkOutTime / workingHours (auto-computed on checkout)
+       - Attendance is tracked Monday-Friday only
+[DONE] POST /api/attendance   - mark today's attendance (upsert, TODAY only)
+       - status=PRESENT: first call records check-in, a later same-day call
+         fills in check-out; working hours auto-calculated
+       - status=ABSENT: employee can self-declare absent for today directly,
+         no approval needed
+       - Rejected outright for any date other than today, and on weekends
+[DONE] GET  /api/attendance          - list attendance (Employee: own only,
+       HR: Employees only, Admin: everyone) with pagination + filters
+       (date, status, userId)
+[DONE] GET  /api/attendance/:id      - get a single attendance record (scoped)
+[DONE] No DELETE endpoint for attendance at all - history is never deletable
+       through the API (audit trail integrity)
+
+   -- Correction requests / "claims" for PAST dates -----------------------
+[DONE] AttendanceCorrectionRequest model (src/models/attendance-correction-request.model.ts)
+       - Separate table: userId, attendanceId (nullable), requestedDate,
+         requestedDay, requestedStatus (PRESENT/ABSENT/HOLIDAY),
+         requestedCheckInTime/CheckOutTime/WorkingHours, reason,
+         status (PENDING/APPROVED/REJECTED), reviewedBy, reviewedAt, reviewNote
+[DONE] POST /api/attendance/corrections           - raise a claim
+       - requestedStatus=PRESENT: time-correction claim, past dates only
+       - requestedStatus=ABSENT / HOLIDAY: can also target today
+       - Nothing in the main `attendances` table changes yet - PENDING only
+[DONE] GET  /api/attendance/corrections            - list claims (scoped by role)
+[DONE] GET  /api/attendance/corrections/:id         - get one claim (scoped)
+[DONE] PATCH /api/attendance/corrections/:id/review - approve/reject (Admin/HR only)
+       - APPROVE is the ONLY code path that ever writes a past date into the
+         `attendances` table - patches the existing row or creates a new
+         backfilled one, using the claim's requestedStatus/times
+       - REJECT leaves `attendances` untouched
+       - HR may only review claims raised by Employees
+
+
+-------------------------------------------------------------------------------
+10. CRON JOBS  (src/jobs/)
+-------------------------------------------------------------------------------
+[DONE] node-cron scheduler wired into server bootstrap/shutdown (src/jobs/index.ts)
+       - startCronJobs() called after DB connects & server starts listening
+       - stopCronJobs() called during graceful shutdown
+       - ENABLE_CRON_JOBS env flag can disable both jobs entirely
+[DONE] Job 1 - Attendance reminder (src/jobs/attendance-reminder.job.ts)
+       - Runs 08:00, Monday-Friday (CRON_TIMEZONE env, default UTC)
+       - Emails every active user who has NOT yet marked today's attendance,
+         reminding them to log in and mark it
+[DONE] Job 2 - Auto-absence marker (src/jobs/attendance-absence-marker.job.ts)
+       - Runs 19:00, Monday-Friday
+       - Any active user with NO attendance row at all for today is
+         automatically marked ABSENT in the `attendances` table, then emailed
+       - Users who already marked PRESENT / ABSENT / HOLIDAY are left alone
+[DONE] Both jobs skip themselves entirely on weekends (belt-and-suspenders,
+       on top of the Mon-Fri cron schedule)
+[DONE] Email utility (src/utils/mailer.ts) - nodemailer wrapper
+       - Best-effort send: NEVER throws; if SMTP_HOST/USER/PASSWORD aren't
+         configured, logs a warning and skips sending instead of failing the
+         job (attendance still gets marked in the DB either way)
+
+
+-------------------------------------------------------------------------------
+11. STILL TO DO / OPEN ITEMS
+-------------------------------------------------------------------------------
+[ ] Run migrations + seeders against Postgres (awaiting explicit go-ahead)
+[ ] Auto-seed a starter set of permission grants per role when a user is
+    created (currently every HR/Employee has ZERO permission grants until
+    Admin manually creates them via POST /api/permissions)
+[ ] Payroll / compensation module (not started)
+[ ] Frontend (not started - backend only so far)
+
+
+===============================================================================
+ END OF LOG - append new sections below as features are added
+===============================================================================

@@ -53,6 +53,45 @@ const envSchema = z.object({
   // in and start creating HR/Employee users on a fresh database.
   ADMIN_EMAIL: z.string().email().default("admin@salary-management.local"),
   ADMIN_PASSWORD: z.string().min(8, "ADMIN_PASSWORD must be at least 8 characters long"),
+
+  // ---- Email (attendance reminder / auto-absence cron jobs) ----
+  // Deliberately all optional: local dev should work without SMTP
+  // configured — the mailer just logs a warning and skips sending instead
+  // of failing the jobs that call it (which still need to mark absentees
+  // in the DB regardless of whether email is set up).
+  // `.optional()` alone isn't enough: an empty `SMTP_HOST=` line in `.env`
+  // parses as `""`, not `undefined`. Treat blank strings as "unset" too.
+  SMTP_HOST: z
+    .string()
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : undefined)),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_USER: z
+    .string()
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : undefined)),
+  SMTP_PASSWORD: z
+    .string()
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : undefined)),
+  SMTP_SECURE: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  SMTP_FROM: z.string().min(1).default("Salary Management <no-reply@salary-management.local>"),
+
+  // ---- Cron jobs ----
+  // Timezone the 8am/7pm attendance job schedules are interpreted in. Keep
+  // this as "UTC" unless `src/utils/date.ts`'s "today"/day-of-week
+  // calculations (also UTC-based) are changed to match — otherwise the
+  // jobs' notion of "today" and the app's could disagree near midnight.
+  CRON_TIMEZONE: z.string().min(1).default("UTC"),
+  // Escape hatch to disable both attendance cron jobs entirely (e.g. when
+  // running multiple app instances and only one should run them, or in tests).
+  ENABLE_CRON_JOBS: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
 });
 
 type RawEnv = z.infer<typeof envSchema>;
@@ -96,6 +135,16 @@ export interface EnvConfig {
   };
   adminEmail: string;
   adminPassword: string;
+  smtp: {
+    host: string | undefined;
+    port: number;
+    user: string | undefined;
+    password: string | undefined;
+    secure: boolean;
+    from: string;
+  };
+  cronTimezone: string;
+  enableCronJobs: boolean;
 }
 
 export const env: Readonly<EnvConfig> = Object.freeze({
@@ -118,4 +167,14 @@ export const env: Readonly<EnvConfig> = Object.freeze({
   }),
   adminEmail: rawEnv.ADMIN_EMAIL,
   adminPassword: rawEnv.ADMIN_PASSWORD,
+  smtp: Object.freeze({
+    host: rawEnv.SMTP_HOST,
+    port: rawEnv.SMTP_PORT,
+    user: rawEnv.SMTP_USER,
+    password: rawEnv.SMTP_PASSWORD,
+    secure: rawEnv.SMTP_SECURE,
+    from: rawEnv.SMTP_FROM,
+  }),
+  cronTimezone: rawEnv.CRON_TIMEZONE,
+  enableCronJobs: rawEnv.ENABLE_CRON_JOBS,
 });

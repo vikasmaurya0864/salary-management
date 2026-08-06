@@ -30,6 +30,8 @@
     "dotenv": "^17.4.2",
     "fastify": "^5.11.2",
     "fastify-plugin": "^6.0.0",
+    "node-cron": "^4.6.0",
+    "nodemailer": "^9.0.4",
     "pg": "^8.22.0",
     "pg-hstore": "^2.3.4",
     "pino": "^10.3.1",
@@ -41,6 +43,7 @@
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
     "@types/node": "^26.1.2",
+    "@types/nodemailer": "^8.0.1",
     "@types/uuid": "^10.0.0",
     "kill-port": "^2.0.1",
     "sequelize-cli": "^6.6.5",
