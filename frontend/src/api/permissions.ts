@@ -1,4 +1,4 @@
-import type { HttpMethod, Paginated, Permission, PermissionStatus } from "../types";
+import type { HttpMethod, Paginated, Permission, PermissionStatus, RoleName } from "../types";
 import { apiRequest } from "./client";
 
 export function listPermissions(params: {
@@ -21,6 +21,25 @@ export function createPermission(input: {
   status?: PermissionStatus;
 }): Promise<Permission> {
   return apiRequest("/api/permissions", { method: "POST", body: input });
+}
+
+export interface BulkPermissionResult {
+  role: RoleName;
+  path: string;
+  method: HttpMethod;
+  totalUsers: number;
+  created: number;
+  alreadyGranted: number;
+}
+
+/** Grants the same path + method to every user currently holding `role`, instead of one user at a time. */
+export function createPermissionsForRole(input: {
+  role: RoleName;
+  path: string;
+  method: HttpMethod;
+  status?: PermissionStatus;
+}): Promise<BulkPermissionResult> {
+  return apiRequest("/api/permissions/bulk-by-role", { method: "POST", body: input });
 }
 
 export function updatePermission(

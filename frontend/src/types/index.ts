@@ -29,6 +29,17 @@ export interface AuthSession {
   user: User;
 }
 
+export interface RoleUserCounts {
+  active: number;
+  inactive: number;
+}
+
+export interface UserStats {
+  totalActive: number;
+  totalInactive: number;
+  byRole: Partial<Record<RoleName, RoleUserCounts>>;
+}
+
 export interface Pagination {
   page: number;
   limit: number;

@@ -1,10 +1,9 @@
 import { FormEvent, useEffect, useState } from "react";
-import { createPermission, deletePermission, listPermissions } from "../../api/permissions";
-import { listUsers } from "../../api/users";
+import { createPermissionsForRole, deletePermission, listPermissions } from "../../api/permissions";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { Loading } from "../../components/Loading";
 import { PageHeader } from "../../components/PageHeader";
-import type { HttpMethod, Permission, User } from "../../types";
+import type { HttpMethod, Permission, RoleName } from "../../types";
 import { getErrorMessage } from "../../utils/errors";
 
 const COMMON_PATHS = [
@@ -21,24 +20,25 @@ const COMMON_PATHS = [
 ];
 
 const METHODS: HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+const ROLES: RoleName[] = ["ADMIN", "HR", "EMPLOYEE"];
 
 export function PermissionsPage() {
   const [items, setItems] = useState<Permission[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ userId: "", path: "/api/attendance", method: "GET" as HttpMethod });
+  const [form, setForm] = useState({
+    role: "EMPLOYEE" as RoleName,
+    path: "/api/attendance",
+    method: "GET" as HttpMethod,
+  });
 
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const [perms, userPage] = await Promise.all([listPermissions({ limit: 100 }), listUsers(1, 100)]);
+      const perms = await listPermissions({ limit: 100 });
       setItems(perms.items);
-      setUsers(userPage.items);
-      if (!form.userId && userPage.items[0]) {
-        setForm((prev) => ({ ...prev, userId: userPage.items[0].id }));
-      }
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -48,14 +48,23 @@ export function PermissionsPage() {
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    setSuccess(null);
     try {
-      await createPermission({ ...form, status: "ACTIVE" });
+      const result = await createPermissionsForRole({
+        role: form.role,
+        path: form.path,
+        method: form.method,
+        status: "ACTIVE",
+      });
+      setSuccess(
+        `Granted ${result.method} ${result.path} to ${result.created} of ${result.totalUsers} ${result.role} user(s)` +
+          (result.alreadyGranted ? ` (${result.alreadyGranted} already had it).` : ".")
+      );
       await load();
     } catch (err) {
       setError(getErrorMessage(err));
@@ -66,18 +75,19 @@ export function PermissionsPage() {
     <section>
       <PageHeader
         title="Permissions"
-        subtitle="HR and Employees need ACTIVE grants per path + method. Admin bypasses this check."
+        subtitle="Grant a path + method to every user in a role. HR and Employees need an ACTIVE grant to call an endpoint; Admin bypasses this check."
       />
       <ErrorBanner message={error} />
+      {success ? <div className="banner banner-success">{success}</div> : null}
       <form className="panel form" onSubmit={onCreate}>
+        <h3>Create permission</h3>
         <div className="grid-2">
           <label>
-            User
-            <select value={form.userId} onChange={(e) => setForm({ ...form, userId: e.target.value })} required>
-              <option value="">Select user</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.firstName} {u.lastName} ({u.role?.name})
+            Role
+            <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as RoleName })} required>
+              {ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {r}
                 </option>
               ))}
             </select>
@@ -103,7 +113,7 @@ export function PermissionsPage() {
           </datalist>
         </label>
         <button className="btn btn-primary" type="submit">
-          Grant permission
+          Create permission
         </button>
       </form>
 
@@ -114,6 +124,7 @@ export function PermissionsPage() {
           <table>
             <thead>
               <tr>
+                <th>Role</th>
                 <th>User</th>
                 <th>Method</th>
                 <th>Path</th>
@@ -124,9 +135,8 @@ export function PermissionsPage() {
             <tbody>
               {items.map((p) => (
                 <tr key={p.id}>
-                  <td>
-                    {p.user ? `${p.user.firstName} ${p.user.lastName}` : p.userId}
-                  </td>
+                  <td>{p.user?.role?.name ?? "—"}</td>
+                  <td>{p.user ? `${p.user.firstName} ${p.user.lastName}` : p.userId}</td>
                   <td>{p.method}</td>
                   <td>
                     <code>{p.path}</code>

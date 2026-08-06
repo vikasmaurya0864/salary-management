@@ -1,8 +1,13 @@
-import type { Paginated, RoleName, User } from "../types";
+import type { Paginated, RoleName, User, UserStats } from "../types";
 import { apiRequest } from "./client";
 
 export function listUsers(page = 1, limit = 20): Promise<Paginated<User>> {
   return apiRequest(`/api/users?page=${page}&limit=${limit}`);
+}
+
+/** Active vs inactive (soft-deleted) headcount per role — powers the admin/HR dashboard stat cards. */
+export function getUserStats(): Promise<UserStats> {
+  return apiRequest(`/api/users/stats`);
 }
 
 export function getUser(id: string): Promise<User> {

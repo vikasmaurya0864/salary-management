@@ -18,6 +18,25 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * `fetch()` itself throws (not a rejected HTTP status) when the request
+ * never reaches the server at all — backend down, wrong host/port, DNS, a
+ * failed CORS preflight, offline, etc. Without this wrapper that raw
+ * runtime error message (e.g. "Failed to fetch"/"fetch failed") would leak
+ * straight into the UI instead of a message users can act on.
+ */
+async function safeFetch(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch {
+    throw new ApiError(
+      "Unable to reach the server. Check your connection and that the backend is running, then try again.",
+      "NETWORK_ERROR",
+      0
+    );
+  }
+}
+
 type RequestOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
   auth?: boolean;
@@ -30,7 +49,7 @@ async function refreshAccessToken(): Promise<boolean> {
   const refreshToken = getRefreshToken();
   if (!refreshToken) return false;
 
-  const response = await fetch(`${BASE_URL}/api/auth/refresh`, {
+  const response = await safeFetch(`${BASE_URL}/api/auth/refresh`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -71,7 +90,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     if (token) headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const response = await safeFetch(`${BASE_URL}${path}`, {
     ...rest,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -115,13 +134,13 @@ export async function apiDownload(path: string): Promise<Blob> {
   const token = getAccessToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  let response = await fetch(`${BASE_URL}${path}`, { headers });
+  let response = await safeFetch(`${BASE_URL}${path}`, { headers });
 
   if (response.status === 401) {
     const refreshed = await ensureRefreshed();
     if (refreshed) {
       headers.set("Authorization", `Bearer ${getAccessToken()}`);
-      response = await fetch(`${BASE_URL}${path}`, { headers });
+      response = await safeFetch(`${BASE_URL}${path}`, { headers });
     }
   }
 

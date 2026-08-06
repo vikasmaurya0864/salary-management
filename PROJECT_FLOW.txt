@@ -137,9 +137,29 @@ files) pending explicit go-ahead to run them against Postgres.
 [DONE] PUT    /api/users/:id    - update own profile fields (name/mobile/address/password)
 [DONE] PATCH  /api/users/:id/role - Admin-only dedicated role allocation endpoint
        - Allocating extra ADMIN accounts through the API is always blocked
+[DONE] Single-admin guarantee (belt-and-suspenders, 2 layers):
+       - Validation: `allocateRoleSchema` only accepts HR/EMPLOYEE — ADMIN is
+         not even a valid enum value for PATCH /api/users/:id/role
+       - Service: `assertCanAssignRole` (user.service.ts) runs a real COUNT
+         query (`userRepository.countByRoleName`) whenever role=ADMIN is
+         requested via POST /api/users; if an admin already exists ->
+         409 CONFLICT "Only one admin account is allowed"; otherwise 403
+         (admin accounts are only ever provisioned by the DB seeder)
+       - Seeder: `20260805130200-seed-initial-data.cjs` checks for an
+         existing ADMIN user before inserting one, so re-running after a
+         `db:seed:undo` (even with a different ADMIN_EMAIL) can't create
+         a second admin
 [DONE] DELETE /api/users/:id    - soft delete (cannot delete self or an Admin account)
 [DONE] Zod validation on all create/update bodies (email format, password
        strength, mobile format, etc.)
+[DONE] GET /api/users/stats     - admin dashboard headcount: { totalActive,
+       totalInactive, byRole: { ADMIN/HR/EMPLOYEE: { active, inactive } } }
+       - "active" = not soft-deleted, "inactive" = soft-deleted (kept for
+         history, not a separate boolean column)
+       - Admin: sees every role; HR: scoped to EMPLOYEE only (same
+         visibility rule as GET /api/users); Employee: 403
+       - Registered before GET /api/users/:id so "stats" isn't swallowed
+         as an :id param
 
 
 -------------------------------------------------------------------------------
@@ -162,6 +182,11 @@ files) pending explicit go-ahead to run them against Postgres.
 [DONE] Permission model (src/models/permission.model.ts) - per-user, per-endpoint
        access grant: { id, userId, path, method, status }
 [DONE] POST   /api/permissions       - grant a user access to an endpoint+method (Admin only)
+[DONE] POST   /api/permissions/bulk-by-role - grant a path+method to EVERY user
+       currently holding a role (ADMIN/HR/EMPLOYEE), instead of one user id
+       at a time (Admin only); users that already have that exact grant are
+       skipped, not errored - response reports { totalUsers, created,
+       alreadyGranted }
 [DONE] GET    /api/permissions       - list grants, optionally filtered by userId (Admin only)
 [DONE] GET    /api/permissions/:id   - get one grant (Admin only)
 [DONE] PUT    /api/permissions/:id   - edit a grant's path/method/status (Admin only)
@@ -273,6 +298,14 @@ files) pending explicit go-ahead to run them against Postgres.
 [DONE] Auth client: X-API-Key + JWT access token + auto refresh on TOKEN_EXPIRED
 [DONE] Admin dashboard (/admin): users, roles, permissions, attendance,
        corrections, reports, profile
+[DONE] Admin dashboard stat cards: total active / inactive users, plus
+       active/inactive breakdown per role (Admin/HR/Employee), backed by
+       GET /api/users/stats
+[DONE] Permissions page: create form is role-based, not user-based - Role
+       dropdown (ADMIN/HR/EMPLOYEE) + Method + Path + Create button, backed
+       by POST /api/permissions/bulk-by-role (grants every user in that role
+       at once); the grants table below still lists/revokes individual
+       per-user rows (role column added) since storage stays per-user
 [DONE] HR dashboard (/hr): employees, attendance, corrections, reports, profile
 [DONE] Employee dashboard (/employee): mark attendance, attendance report
        (6 months), edit profile (name/mobile/contact)
