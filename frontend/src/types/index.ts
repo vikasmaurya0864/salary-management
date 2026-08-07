@@ -1,4 +1,6 @@
 export type RoleName = "ADMIN" | "HR" | "EMPLOYEE";
+export type EmploymentStatus = "ACTIVE" | "ON_LEAVE" | "TERMINATED";
+export type CurrencyCode = "USD" | "EUR" | "GBP" | "INR" | "AED" | "SGD" | "AUD" | "CAD";
 
 export interface Role {
   id: string;
@@ -15,10 +17,64 @@ export interface User {
   email: string;
   mobile: string;
   address: string | null;
+  country: string | null;
+  currency: CurrencyCode;
+  department: string | null;
+  jobTitle: string | null;
+  employmentStatus: EmploymentStatus;
+  joinedAt: string | null;
+  exitedAt: string | null;
   roleId: string;
   createdAt: string;
   updatedAt: string;
   role?: Role;
+}
+
+export interface Salary {
+  id: string;
+  userId: string;
+  currency: CurrencyCode;
+  baseSalary: string;
+  allowances: string;
+  deductions: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  note: string | null;
+  createdBy: string;
+  user?: User;
+  creator?: User;
+}
+
+export interface Payslip {
+  id: string;
+  userId: string;
+  salaryId: string | null;
+  year: number;
+  month: number;
+  currency: CurrencyCode;
+  baseSalary: string;
+  allowances: string;
+  deductions: string;
+  gross: string;
+  net: string;
+  user?: User;
+}
+
+export interface SalaryAnalyticsBucket {
+  key: string;
+  employeeCount: number;
+  totalBase: number;
+  totalAllowances: number;
+  totalDeductions: number;
+  totalGross: number;
+  totalNet: number;
+  averageNet: number;
+}
+
+export interface SalaryAnalytics {
+  groupBy: "country" | "currency" | "department" | "role";
+  totalEmployeesOnPayroll: number;
+  buckets: SalaryAnalyticsBucket[];
 }
 
 export interface AuthSession {

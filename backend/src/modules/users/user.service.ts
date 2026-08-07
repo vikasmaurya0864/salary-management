@@ -5,6 +5,7 @@ import { ALL_ROLE_NAMES, ROLE_NAMES, type RoleName } from "../../constants/roles
 import { AppError, BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../../utils/app-error";
 import { buildCacheKey, CACHE_NAMESPACE, invalidateNamespace, withCache } from "../../utils/cache";
 import type { Logger } from "../../utils/logger";
+import { presentUser } from "../../utils/present-user";
 import { scopedLogger } from "../../utils/scoped-logger";
 import type { AllocateRoleInput, CreateUserInput, ListUsersQuery, UpdateUserInput } from "./user.validation";
 
@@ -97,6 +98,13 @@ export async function createUser(logger: Logger, creatorRole: RoleName, input: C
     password: input.password,
     mobile: input.mobile,
     address: input.address ?? null,
+    country: input.country ?? null,
+    currency: input.currency ?? "USD",
+    department: input.department ?? null,
+    jobTitle: input.jobTitle ?? null,
+    employmentStatus: input.employmentStatus ?? "ACTIVE",
+    joinedAt: input.joinedAt ?? null,
+    exitedAt: input.exitedAt ?? null,
     roleId: role.id,
   });
 
@@ -107,7 +115,8 @@ export async function createUser(logger: Logger, creatorRole: RoleName, input: C
 }
 
 export interface PaginatedUsers {
-  items: User[];
+  /** Plain user payloads (password stripped) — safe to cache / return. */
+  items: Record<string, unknown>[];
   pagination: { page: number; limit: number; total: number; totalPages: number };
 }
 
@@ -128,9 +137,12 @@ export async function listUsers(
 
   const offset = (query.page - 1) * query.limit;
   const cacheKey = buildCacheKey(CACHE_NAMESPACE.USERS, "list", requester.role, query.page, query.limit);
-  const { rows, count } = await withCache(log, cacheKey, () =>
-    userRepository.findAndCountAll(log, { where, limit: query.limit, offset })
-  );
+  // Present before caching so Redis never stores Sequelize instances (or passwords)
+  // and cache hits stay usable without `.toJSON()`.
+  const { rows, count } = await withCache(log, cacheKey, async () => {
+    const result = await userRepository.findAndCountAll(log, { where, limit: query.limit, offset });
+    return { rows: result.rows.map((user) => presentUser(user)), count: result.count };
+  });
 
   log.info({ total: count }, "List users - completed");
   return {
@@ -204,10 +216,10 @@ export async function getUserById(logger: Logger, requester: RequestingUser, id:
   const log = scopedLogger(logger, LAYER, "getUserById");
   log.info({ id }, "Get user - processing");
 
-  // Cached by id only (not by requester) — the underlying record is the
-  // same for everyone; `assertCanAccessTarget` still runs on every call
-  // (cached or not) so authorization is never skipped.
-  const user = await withCache(log, buildCacheKey(CACHE_NAMESPACE.USERS, "byId", id), () => findUserOrThrow(log, id));
+  // Always load a live model for authorization (role association). List
+  // responses are cached separately as plain objects; by-id reads are cheap
+  // enough that we avoid the cache/model mismatch that broke `.toJSON()`.
+  const user = await findUserOrThrow(log, id);
   assertCanAccessTarget(requester, user);
 
   log.info({ id }, "Get user - completed");
@@ -231,6 +243,19 @@ export async function updateUser(
   if (input.mobile !== undefined) user.mobile = input.mobile;
   if (input.address !== undefined) user.address = input.address;
   if (input.password !== undefined) user.password = input.password; // re-hashed by the model's beforeUpdate hook
+
+  // Employment / org master-data is HR/Admin-managed — employees cannot
+  // change their own country, department, status, etc. via profile edit.
+  const canEditEmployment = requester.role === ROLE_NAMES.ADMIN || requester.role === ROLE_NAMES.HR;
+  if (canEditEmployment) {
+    if (input.country !== undefined) user.country = input.country;
+    if (input.currency !== undefined) user.currency = input.currency;
+    if (input.department !== undefined) user.department = input.department;
+    if (input.jobTitle !== undefined) user.jobTitle = input.jobTitle;
+    if (input.employmentStatus !== undefined) user.employmentStatus = input.employmentStatus;
+    if (input.joinedAt !== undefined) user.joinedAt = input.joinedAt;
+    if (input.exitedAt !== undefined) user.exitedAt = input.exitedAt;
+  }
 
   await userRepository.save(log, user);
   await invalidateNamespace(log, CACHE_NAMESPACE.USERS);

@@ -17,7 +17,9 @@
     "db:seed": "sequelize-cli db:seed:all",
     "db:seed:undo": "sequelize-cli db:seed:undo:all",
     "db:reset": "npm run db:migrate:undo:all && npm run db:migrate && npm run db:seed",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:seed:10k": "sequelize-cli db:seed --seed 20260807140000-seed-10k-employees.cjs"
   },
   "keywords": [],
   "author": "",
@@ -50,6 +52,7 @@
     "kill-port": "^2.0.1",
     "sequelize-cli": "^6.6.5",
     "tsx": "^4.23.7",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   }
 }

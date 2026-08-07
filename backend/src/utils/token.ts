@@ -41,3 +41,9 @@ export function generateRefreshToken(): IssuedRefreshToken {
 export function hashRefreshToken(plaintext: string): string {
   return createHash("sha256").update(plaintext).digest("hex");
 }
+
+/** 6-digit numeric OTP for password reset (emailed once; only the hash is stored). */
+export function generatePasswordResetOtp(): { otp: string; otpHash: string } {
+  const otp = String(randomBytes(3).readUIntBE(0, 3) % 1_000_000).padStart(6, "0");
+  return { otp, otpHash: hashRefreshToken(otp) };
+}

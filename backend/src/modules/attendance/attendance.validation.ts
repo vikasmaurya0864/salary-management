@@ -29,7 +29,7 @@ export type MarkAttendanceInput = z.infer<typeof markAttendanceSchema>;
 
 export const listAttendanceQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(100).default(20),
+  limit: z.coerce.number().int().positive().max(15).default(15),
   userId: z.string().uuid().optional(),
   date: dateOnly.optional(),
   status: z.enum([ATTENDANCE_STATUS.PRESENT, ATTENDANCE_STATUS.ABSENT, ATTENDANCE_STATUS.HOLIDAY]).optional(),
@@ -64,7 +64,7 @@ export type RequestCorrectionInput = z.infer<typeof requestCorrectionSchema>;
 
 export const listCorrectionsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(100).default(20),
+  limit: z.coerce.number().int().positive().max(15).default(15),
   status: z.enum(["PENDING", "APPROVED", "REJECTED"]).optional(),
 });
 export type ListCorrectionsQuery = z.infer<typeof listCorrectionsQuerySchema>;

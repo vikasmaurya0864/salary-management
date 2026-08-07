@@ -34,7 +34,7 @@ export type UpdatePermissionInput = z.infer<typeof updatePermissionSchema>;
 
 export const listPermissionsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(100).default(20),
+  limit: z.coerce.number().int().positive().max(15).default(15),
   roleId: z.string().uuid().optional(),
 });
 export type ListPermissionsQuery = z.infer<typeof listPermissionsQuerySchema>;

@@ -26,3 +26,23 @@ export const refreshTokenSchema = z.object({
   refreshToken: z.string().trim().min(1, "refreshToken is required"),
 });
 export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().toLowerCase().email("Invalid email address"),
+});
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+
+export const resetPasswordSchema = z.object({
+  email: z.string().trim().toLowerCase().email("Invalid email address"),
+  otp: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, "OTP must be a 6-digit code"),
+  newPassword: z.string().min(8, "Password must be at least 8 characters long").max(100),
+});
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+
+export const logoutSchema = z.object({
+  refreshToken: z.string().trim().min(1, "refreshToken is required"),
+});
+export type LogoutInput = z.infer<typeof logoutSchema>;

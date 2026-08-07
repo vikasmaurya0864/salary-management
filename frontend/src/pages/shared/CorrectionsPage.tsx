@@ -4,22 +4,30 @@ import { useAuth } from "../../auth/AuthContext";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { Loading } from "../../components/Loading";
 import { PageHeader } from "../../components/PageHeader";
-import type { CorrectionRequest } from "../../types";
+import { PaginationBar } from "../../components/PaginationBar";
+import { PAGE_SIZE } from "../../constants";
+import type { CorrectionRequest, Pagination } from "../../types";
 import { getErrorMessage } from "../../utils/errors";
+
+const EMPTY_PAGINATION: Pagination = { page: 1, limit: PAGE_SIZE, total: 0, totalPages: 1 };
 
 export function CorrectionsPage({ canReview = false }: { canReview?: boolean }) {
   const { role } = useAuth();
   const reviewEnabled = canReview || role === "ADMIN" || role === "HR";
   const [items, setItems] = useState<CorrectionRequest[]>([]);
+  const [pagination, setPagination] = useState<Pagination>(EMPTY_PAGINATION);
+  const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  async function load() {
+  async function load(nextPage = page) {
     setLoading(true);
     setError(null);
     try {
-      const data = await listCorrections({ page: 1, limit: 50 });
+      const data = await listCorrections({ page: nextPage, limit: PAGE_SIZE });
       setItems(data.items);
+      setPagination(data.pagination);
+      setPage(data.pagination.page);
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -28,14 +36,15 @@ export function CorrectionsPage({ canReview = false }: { canReview?: boolean }) 
   }
 
   useEffect(() => {
-    void load();
-  }, []);
+    void load(page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
 
   async function onReview(id: string, action: "APPROVE" | "REJECT") {
     setError(null);
     try {
       await reviewCorrection(id, { action });
-      await load();
+      await load(page);
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -100,6 +109,7 @@ export function CorrectionsPage({ canReview = false }: { canReview?: boolean }) 
               )}
             </tbody>
           </table>
+          <PaginationBar pagination={pagination} onPageChange={setPage} disabled={loading} />
         </div>
       )}
     </section>

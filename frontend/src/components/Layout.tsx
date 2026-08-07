@@ -14,6 +14,8 @@ function navForRole(role: RoleName): NavItem[] {
       { to: "/admin/users", label: "Users" },
       { to: "/admin/roles", label: "Roles" },
       { to: "/admin/permissions", label: "Permissions" },
+      { to: "/admin/salaries", label: "Salaries" },
+      { to: "/admin/payroll", label: "Payroll analytics" },
       { to: "/admin/attendance", label: "Attendance" },
       { to: "/admin/corrections", label: "Corrections" },
       { to: "/admin/report", label: "Reports" },
@@ -24,9 +26,11 @@ function navForRole(role: RoleName): NavItem[] {
     return [
       { to: "/hr", label: "Dashboard" },
       { to: "/hr/employees", label: "Employees" },
+      { to: "/hr/salaries", label: "Salaries" },
+      { to: "/hr/payroll", label: "Payroll analytics" },
       { to: "/hr/attendance", label: "Attendance" },
       { to: "/hr/corrections", label: "Corrections" },
-      { to: "/hr/report", label: "Reports" },
+      { to: "/hr/report", label: "Attendance reports" },
       { to: "/hr/profile", label: "Profile" },
     ];
   }
@@ -34,8 +38,15 @@ function navForRole(role: RoleName): NavItem[] {
     { to: "/employee", label: "Dashboard" },
     { to: "/employee/attendance", label: "Mark attendance" },
     { to: "/employee/report", label: "Attendance report" },
+    { to: "/employee/salary", label: "My salary" },
     { to: "/employee/profile", label: "Profile" },
   ];
+}
+
+function initials(first?: string, last?: string): string {
+  const a = first?.trim().charAt(0) ?? "";
+  const b = last?.trim().charAt(0) ?? "";
+  return (a + b).toUpperCase() || "U";
 }
 
 export function Layout() {
@@ -46,13 +57,13 @@ export function Layout() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">SM</span>
+          <span className="brand-mark">AC</span>
           <div>
-            <strong>Salary Portal</strong>
-            <small>{role ?? "User"}</small>
+            <strong>ACME Pay</strong>
+            <small>{role ?? "Workspace"}</small>
           </div>
         </div>
-        <nav className="nav">
+        <nav className="nav" aria-label="Main">
           {items.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.to.split("/").length <= 2}>
               {item.label}
@@ -60,10 +71,16 @@ export function Layout() {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <p>
-            {user?.firstName} {user?.lastName}
-          </p>
-          <button type="button" className="btn btn-ghost" onClick={logout}>
+          <div className="user-chip">
+            <span className="user-avatar" aria-hidden>
+              {initials(user?.firstName, user?.lastName)}
+            </span>
+            <p>
+              {user?.firstName} {user?.lastName}
+              <span>{user?.email}</span>
+            </p>
+          </div>
+          <button type="button" className="btn btn-ghost" onClick={() => void logout()}>
             Sign out
           </button>
         </div>

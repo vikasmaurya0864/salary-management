@@ -17,6 +17,8 @@ export const CACHE_NAMESPACE = {
   PERMISSIONS: "cache:permissions",
   ATTENDANCE: "cache:attendance",
   CORRECTIONS: "cache:corrections",
+  SALARIES: "cache:salaries",
+  PAYSLIPS: "cache:payslips",
 } as const;
 export type CacheNamespace = (typeof CACHE_NAMESPACE)[keyof typeof CACHE_NAMESPACE];
 

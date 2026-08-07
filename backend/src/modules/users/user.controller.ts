@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { allocateRoleSchema, createUserSchema, listUsersQuerySchema, updateUserSchema } from "./user.validation";
 import * as userService from "./user.service";
+import { presentUser } from "../../utils/present-user";
 import { sendValidationError } from "../../utils/validation";
 import { successResponse } from "../../utils/response";
 import { scopedLogger } from "../../utils/scoped-logger";
@@ -19,7 +20,7 @@ export async function createUserHandler(request: FastifyRequest, reply: FastifyR
 
   const user = await userService.createUser(log, request.user.role, parsed.data);
   log.info({ id: user.id }, "Create user - request completed");
-  return reply.status(201).send(successResponse(user.toJSON()));
+  return reply.status(201).send(successResponse(presentUser(user)));
 }
 
 export async function listUsersHandler(request: FastifyRequest, reply: FastifyReply) {
@@ -35,7 +36,7 @@ export async function listUsersHandler(request: FastifyRequest, reply: FastifyRe
   log.info({ total: result.pagination.total }, "List users - request completed");
   return reply.send(
     successResponse({
-      items: result.items.map((user) => user.toJSON()),
+      items: result.items.map((user) => presentUser(user)),
       pagination: result.pagination,
     })
   );
@@ -62,7 +63,7 @@ export async function getUserHandler(request: FastifyRequest<{ Params: IdParams 
   );
 
   log.info({ id: request.params.id }, "Get user - request completed");
-  return reply.send(successResponse(user.toJSON()));
+  return reply.send(successResponse(presentUser(user)));
 }
 
 export async function updateUserHandler(request: FastifyRequest<{ Params: IdParams }>, reply: FastifyReply) {
@@ -82,7 +83,7 @@ export async function updateUserHandler(request: FastifyRequest<{ Params: IdPara
   );
 
   log.info({ id: request.params.id }, "Update user - request completed");
-  return reply.send(successResponse(user.toJSON()));
+  return reply.send(successResponse(presentUser(user)));
 }
 
 export async function allocateRoleHandler(request: FastifyRequest<{ Params: IdParams }>, reply: FastifyReply) {
@@ -102,7 +103,7 @@ export async function allocateRoleHandler(request: FastifyRequest<{ Params: IdPa
   );
 
   log.info({ id: request.params.id, newRole: parsed.data.role }, "Allocate role - request completed");
-  return reply.send(successResponse(user.toJSON()));
+  return reply.send(successResponse(presentUser(user)));
 }
 
 export async function deleteUserHandler(request: FastifyRequest<{ Params: IdParams }>, reply: FastifyReply) {

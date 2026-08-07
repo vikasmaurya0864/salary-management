@@ -42,17 +42,30 @@ export async function createPermission(
     throw new ConflictError(`A grant for ${input.method} ${input.path} already exists for role ${input.role}`);
   }
 
-  const permission = await permissionRepository.create(log, {
-    roleId: role.id,
-    createdBy: createdById,
-    path: input.path,
-    method: input.method,
-    status: input.status,
-  });
-  await invalidateNamespace(log, CACHE_NAMESPACE.PERMISSIONS);
-
-  log.info({ id: permission.id, role: input.role }, "Create permission - completed");
-  return permission;
+  try {
+    const permission = await permissionRepository.create(log, {
+      roleId: role.id,
+      createdBy: createdById,
+      path: input.path,
+      method: input.method,
+      status: input.status,
+    });
+    await invalidateNamespace(log, CACHE_NAMESPACE.PERMISSIONS);
+    log.info({ id: permission.id, role: input.role }, "Create permission - completed");
+    return permission;
+  } catch (error) {
+    // Concurrent duplicate creates race past the pre-check; the unique
+    // index on (roleId, path, method) is the real guard — surface as 409.
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "name" in error &&
+      (error as { name?: string }).name === "SequelizeUniqueConstraintError"
+    ) {
+      throw new ConflictError(`A grant for ${input.method} ${input.path} already exists for role ${input.role}`);
+    }
+    throw error;
+  }
 }
 
 export interface PaginatedPermissions {

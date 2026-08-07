@@ -1,6 +1,21 @@
 import type { FastifyInstance } from "fastify";
-import { loginSchema, refreshTokenSchema, registerSchema } from "./auth.validation";
-import { authenticateUser, createAuthSession, refreshAuthSession, registerUser } from "./auth.service";
+import {
+  forgotPasswordSchema,
+  loginSchema,
+  logoutSchema,
+  refreshTokenSchema,
+  registerSchema,
+  resetPasswordSchema,
+} from "./auth.validation";
+import {
+  authenticateUser,
+  createAuthSession,
+  logout,
+  refreshAuthSession,
+  registerUser,
+  requestPasswordReset,
+  resetPasswordWithOtp,
+} from "./auth.service";
 import { successResponse } from "../../utils/response";
 import { sendValidationError } from "../../utils/validation";
 import { scopedLogger } from "../../utils/scoped-logger";
@@ -20,8 +35,9 @@ function sessionResponse(session: Awaited<ReturnType<typeof createAuthSession>>)
 
 /**
  * Auth routes sit behind the `/api` X-API-Key guard but are intentionally
- * NOT behind JWT / permission checks — login, register, and refresh are how
- * a client obtains (or renews) those tokens in the first place.
+ * NOT behind JWT / permission checks — login, register, refresh, forgot/
+ * reset password, and logout (by refresh token) are how a client obtains
+ * or ends those tokens.
  */
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post("/login", async (request, reply) => {
@@ -87,5 +103,47 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     log.info({ userId: session.user.id }, "Refresh - request completed");
     return reply.send(successResponse(sessionResponse(session)));
+  });
+
+  app.post("/forgot-password", async (request, reply) => {
+    const log = scopedLogger(request.log, LAYER, "forgotPasswordHandler");
+    log.info("Forgot password - request received");
+
+    const parsed = forgotPasswordSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return sendValidationError(reply, parsed.error);
+    }
+
+    const result = await requestPasswordReset(log, parsed.data);
+    log.info("Forgot password - request completed");
+    return reply.send(successResponse(result));
+  });
+
+  app.post("/reset-password", async (request, reply) => {
+    const log = scopedLogger(request.log, LAYER, "resetPasswordHandler");
+    log.info("Reset password - request received");
+
+    const parsed = resetPasswordSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return sendValidationError(reply, parsed.error);
+    }
+
+    const result = await resetPasswordWithOtp(log, parsed.data);
+    log.info("Reset password - request completed");
+    return reply.send(successResponse(result));
+  });
+
+  app.post("/logout", async (request, reply) => {
+    const log = scopedLogger(request.log, LAYER, "logoutHandler");
+    log.info("Logout - request received");
+
+    const parsed = logoutSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return sendValidationError(reply, parsed.error);
+    }
+
+    const result = await logout(log, parsed.data);
+    log.info("Logout - request completed");
+    return reply.send(successResponse(result));
   });
 }

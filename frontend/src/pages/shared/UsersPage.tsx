@@ -4,12 +4,20 @@ import { useAuth } from "../../auth/AuthContext";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { Loading } from "../../components/Loading";
 import { PageHeader } from "../../components/PageHeader";
-import type { RoleName, User } from "../../types";
+import { PaginationBar } from "../../components/PaginationBar";
+import { PAGE_SIZE } from "../../constants";
+import type { CurrencyCode, Pagination, RoleName, User } from "../../types";
 import { getErrorMessage } from "../../utils/errors";
+
+const CURRENCIES: CurrencyCode[] = ["USD", "EUR", "GBP", "INR", "AED", "SGD", "AUD", "CAD"];
+
+const EMPTY_PAGINATION: Pagination = { page: 1, limit: PAGE_SIZE, total: 0, totalPages: 1 };
 
 export function UsersPage({ title = "Users", createRoleDefault = "EMPLOYEE" as RoleName }) {
   const { role } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
+  const [pagination, setPagination] = useState<Pagination>(EMPTY_PAGINATION);
+  const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
@@ -19,14 +27,20 @@ export function UsersPage({ title = "Users", createRoleDefault = "EMPLOYEE" as R
     password: "",
     mobile: "",
     role: createRoleDefault,
+    country: "",
+    currency: "USD" as CurrencyCode,
+    department: "",
+    jobTitle: "",
   });
 
-  async function load() {
+  async function load(nextPage = page) {
     setLoading(true);
     setError(null);
     try {
-      const data = await listUsers(1, 100);
+      const data = await listUsers(nextPage, PAGE_SIZE);
       setUsers(data.items);
+      setPagination(data.pagination);
+      setPage(data.pagination.page);
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -35,8 +49,9 @@ export function UsersPage({ title = "Users", createRoleDefault = "EMPLOYEE" as R
   }
 
   useEffect(() => {
-    void load();
-  }, []);
+    void load(page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when page changes
+  }, [page]);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -49,9 +64,25 @@ export function UsersPage({ title = "Users", createRoleDefault = "EMPLOYEE" as R
         password: form.password,
         mobile: form.mobile.trim(),
         role: form.role,
+        country: form.country.trim() ? form.country.trim().toUpperCase() : null,
+        currency: form.currency,
+        department: form.department.trim() || null,
+        jobTitle: form.jobTitle.trim() || null,
       });
-      setForm({ firstName: "", lastName: "", email: "", password: "", mobile: "", role: createRoleDefault });
-      await load();
+      setForm({
+        firstName: "",
+        lastName: "",
+        email: "",
+        password: "",
+        mobile: "",
+        role: createRoleDefault,
+        country: "",
+        currency: "USD",
+        department: "",
+        jobTitle: "",
+      });
+      setPage(1);
+      await load(1);
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -61,7 +92,7 @@ export function UsersPage({ title = "Users", createRoleDefault = "EMPLOYEE" as R
     setError(null);
     try {
       await updateUserRole(id, nextRole);
-      await load();
+      await load(page);
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -72,7 +103,7 @@ export function UsersPage({ title = "Users", createRoleDefault = "EMPLOYEE" as R
     setError(null);
     try {
       await deleteUser(id);
-      await load();
+      await load(page);
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -122,6 +153,37 @@ export function UsersPage({ title = "Users", createRoleDefault = "EMPLOYEE" as R
             </select>
           </label>
         </div>
+        <div className="grid-2">
+          <label>
+            Country (ISO-2)
+            <input
+              value={form.country}
+              maxLength={2}
+              placeholder="IN"
+              onChange={(e) => setForm({ ...form, country: e.target.value })}
+            />
+          </label>
+          <label>
+            Currency
+            <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value as CurrencyCode })}>
+              {CURRENCIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="grid-2">
+          <label>
+            Department
+            <input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} />
+          </label>
+          <label>
+            Job title
+            <input value={form.jobTitle} onChange={(e) => setForm({ ...form, jobTitle: e.target.value })} />
+          </label>
+        </div>
         <button className="btn btn-primary" type="submit">
           Create
         </button>
@@ -136,7 +198,9 @@ export function UsersPage({ title = "Users", createRoleDefault = "EMPLOYEE" as R
               <tr>
                 <th>Name</th>
                 <th>Email</th>
-                <th>Mobile</th>
+                <th>Country</th>
+                <th>Currency</th>
+                <th>Dept</th>
                 <th>Role</th>
                 <th>Actions</th>
               </tr>
@@ -148,7 +212,9 @@ export function UsersPage({ title = "Users", createRoleDefault = "EMPLOYEE" as R
                     {u.firstName} {u.lastName}
                   </td>
                   <td>{u.email}</td>
-                  <td>{u.mobile}</td>
+                  <td>{u.country ?? "—"}</td>
+                  <td>{u.currency ?? "—"}</td>
+                  <td>{u.department ?? "—"}</td>
                   <td>{u.role?.name ?? "—"}</td>
                   <td className="row-actions">
                     {role === "ADMIN" && u.role?.name !== "ADMIN" ? (
@@ -168,6 +234,7 @@ export function UsersPage({ title = "Users", createRoleDefault = "EMPLOYEE" as R
               ))}
             </tbody>
           </table>
+          <PaginationBar pagination={pagination} onPageChange={setPage} disabled={loading} />
         </div>
       )}
     </section>

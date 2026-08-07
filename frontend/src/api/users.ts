@@ -1,7 +1,8 @@
-import type { Paginated, RoleName, User, UserStats } from "../types";
+import { PAGE_SIZE } from "../constants";
+import type { CurrencyCode, EmploymentStatus, Paginated, RoleName, User, UserStats } from "../types";
 import { apiRequest } from "./client";
 
-export function listUsers(page = 1, limit = 20): Promise<Paginated<User>> {
+export function listUsers(page = 1, limit = PAGE_SIZE): Promise<Paginated<User>> {
   return apiRequest(`/api/users?page=${page}&limit=${limit}`);
 }
 
@@ -22,13 +23,32 @@ export function createUser(input: {
   mobile: string;
   address?: string;
   role: RoleName;
+  country?: string | null;
+  currency?: CurrencyCode;
+  department?: string | null;
+  jobTitle?: string | null;
+  employmentStatus?: EmploymentStatus;
+  joinedAt?: string | null;
 }): Promise<User> {
   return apiRequest("/api/users", { method: "POST", body: input });
 }
 
 export function updateUser(
   id: string,
-  input: Partial<{ firstName: string; lastName: string; mobile: string; address: string; password: string }>
+  input: Partial<{
+    firstName: string;
+    lastName: string;
+    mobile: string;
+    address: string;
+    password: string;
+    country: string | null;
+    currency: CurrencyCode;
+    department: string | null;
+    jobTitle: string | null;
+    employmentStatus: EmploymentStatus;
+    joinedAt: string | null;
+    exitedAt: string | null;
+  }>
 ): Promise<User> {
   return apiRequest(`/api/users/${id}`, { method: "PUT", body: input });
 }

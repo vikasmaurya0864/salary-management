@@ -3,8 +3,12 @@ import { createPermission, deletePermission, listPermissions } from "../../api/p
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { Loading } from "../../components/Loading";
 import { PageHeader } from "../../components/PageHeader";
-import type { HttpMethod, Permission, RoleName } from "../../types";
+import { PaginationBar } from "../../components/PaginationBar";
+import { PAGE_SIZE } from "../../constants";
+import type { HttpMethod, Pagination, Permission, RoleName } from "../../types";
 import { getErrorMessage } from "../../utils/errors";
+
+const EMPTY_PAGINATION: Pagination = { page: 1, limit: PAGE_SIZE, total: 0, totalPages: 1 };
 
 const COMMON_PATHS = [
   "/api/users",
@@ -17,6 +21,11 @@ const COMMON_PATHS = [
   "/api/attendance/corrections",
   "/api/attendance/corrections/:id",
   "/api/attendance/corrections/:id/review",
+  "/api/salaries",
+  "/api/salaries/:id",
+  "/api/salaries/history/:userId",
+  "/api/salaries/analytics",
+  "/api/salaries/payslips",
 ];
 
 const METHODS: HttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
@@ -24,6 +33,8 @@ const ROLES: RoleName[] = ["ADMIN", "HR", "EMPLOYEE"];
 
 export function PermissionsPage() {
   const [items, setItems] = useState<Permission[]>([]);
+  const [pagination, setPagination] = useState<Pagination>(EMPTY_PAGINATION);
+  const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,12 +44,14 @@ export function PermissionsPage() {
     method: "GET" as HttpMethod,
   });
 
-  async function load() {
+  async function load(nextPage = page) {
     setLoading(true);
     setError(null);
     try {
-      const perms = await listPermissions({ limit: 100 });
+      const perms = await listPermissions({ page: nextPage, limit: PAGE_SIZE });
       setItems(perms.items);
+      setPagination(perms.pagination);
+      setPage(perms.pagination.page);
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -47,8 +60,9 @@ export function PermissionsPage() {
   }
 
   useEffect(() => {
-    void load();
-  }, []);
+    void load(page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -148,7 +162,7 @@ export function PermissionsPage() {
                       onClick={async () => {
                         try {
                           await deletePermission(p.id);
-                          await load();
+                          await load(page);
                         } catch (err) {
                           setError(getErrorMessage(err));
                         }
@@ -161,6 +175,7 @@ export function PermissionsPage() {
               ))}
             </tbody>
           </table>
+          <PaginationBar pagination={pagination} onPageChange={setPage} disabled={loading} />
         </div>
       )}
     </section>

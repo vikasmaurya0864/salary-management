@@ -1,0 +1,73 @@
+===============================================================================
+ ACME SALARY MANAGEMENT — ONE-PAGE REQUIREMENTS
+ Persona: HR Manager | Scale: ~10,000 employees | Multi-country
+ Last reviewed: 2026-08-07
+ Status: [DONE] | [PARTIAL] | [TODO]
+===============================================================================
+
+GOAL
+----
+Replace Excel-based salary tracking with a web app so the HR Manager can
+manage compensation for ~10,000 employees across countries and answer
+questions about how the organisation pays people — without spreadsheets.
+
+
+SCOPE & FEATURES (IN)
+---------------------
+1. Identity & access
+   [DONE] Login / JWT + refresh / API key; roles Admin, HR, Employee
+   [DONE] Role-scoped permissions (seeded defaults for HR/Employee)
+   [DONE] Forgot password (email OTP, 10 min DB expiry) + logout (revoke refresh)
+
+2. Employee master
+   [DONE] CRUD + soft-delete; country, currency, dept, title, status, dates
+   [DONE] Seeded dataset of 10,000 multi-country employees (+ current salary)
+
+3. Attendance (payroll input support)
+   [DONE] Daily mark, corrections, monthly reports, reminder/absence crons
+
+4. Salary / compensation
+   [DONE] Packages with base/allowances/deductions, currency, effective dates
+   [DONE] Revision history (close previous package on revise)
+   [DONE] Monthly payslip snapshots (gross/net frozen)
+
+5. HR analytics (“how we pay people”)
+   [DONE] Totals / averages by country, currency, department, role + CSV export
+   [DONE] UI for Admin/HR; Employee can view own package/payslips
+
+6. Quality
+   [DONE] One-page requirements (this file)
+   [DONE] Fast, deterministic unit tests for core payroll math, CSV, validation
+         (`npm test` in backend/ — no DB required)
+
+
+DELIBERATELY OUT OF SCOPE (and why)
+-----------------------------------
+- Statutory tax / PF / ESI engines — country compliance is a separate product
+- Bank disbursement / payment rails — export for finance is enough for Excel exit
+- Leave ATS / performance / recruiting — orthogonal HRIS modules
+- Multi-tenant SaaS, native mobile, AI chatbot — not required for ACME v1
+- Cross-currency FX conversion in analytics — report in native currency buckets
+
+
+SUCCESS CRITERIA
+----------------
+- HR can browse/filter pay for a 10k-employee org without Excel as SoT
+- HR can answer payroll cost by country/currency/dept/role (UI + CSV)
+- Individual current + historical compensation is available
+- Unit tests cover core pay math and stay fast/deterministic
+
+
+HOW TO RUN KEY BITS
+-------------------
+  backend: npm run db:seed:10k   # idempotent 10k employee + salary seed
+  backend: npm test              # unit tests (vitest)
+  Sample employee login: employee2@acme.example / Employee@1234
+  Admin login: from .env ADMIN_EMAIL / ADMIN_PASSWORD
+
+
+REMAINING (optional polish only)
+--------------------------------
+[ ] Bulk CSV *upload* UI/API (seed covers scale demo; upload is nicer UX)
+[ ] Median / FX / date-range filters on analytics
+===============================================================================

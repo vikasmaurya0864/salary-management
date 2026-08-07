@@ -1,15 +1,35 @@
 import type { FastifyInstance } from "fastify";
 import type { User } from "../../models";
+import { env } from "../../config/env";
 import * as userRepository from "../../repositories/user.repository";
 import * as roleRepository from "../../repositories/role.repository";
 import * as refreshTokenRepository from "../../repositories/refresh-token.repository";
+import * as passwordResetOtpRepository from "../../repositories/password-reset-otp.repository";
 import { comparePassword } from "../../utils/password";
-import { generateRefreshToken, hashRefreshToken, issueAccessToken } from "../../utils/token";
+import { sendMail } from "../../utils/mailer";
+import {
+  generatePasswordResetOtp,
+  generateRefreshToken,
+  hashRefreshToken,
+  issueAccessToken,
+} from "../../utils/token";
 import { ROLE_NAMES, type RoleName } from "../../constants/roles";
 import { AppError, ConflictError } from "../../utils/app-error";
+import { CACHE_NAMESPACE, invalidateNamespace } from "../../utils/cache";
 import type { Logger } from "../../utils/logger";
 import { scopedLogger } from "../../utils/scoped-logger";
-import type { LoginInput, RefreshTokenInput, RegisterInput } from "./auth.validation";
+import type {
+  ForgotPasswordInput,
+  LoginInput,
+  LogoutInput,
+  RefreshTokenInput,
+  RegisterInput,
+  ResetPasswordInput,
+} from "./auth.validation";
+
+/** Generic reply for forgot-password so callers can't enumerate registered emails. */
+const FORGOT_PASSWORD_ACK =
+  "If an account exists for that email, a one-time reset code has been sent. It expires in 10 minutes.";
 
 const LAYER = "AuthService";
 
@@ -91,6 +111,13 @@ export async function registerUser(logger: Logger, input: RegisterInput): Promis
     password: input.password,
     mobile: input.mobile,
     address: input.address ?? null,
+    country: null,
+    currency: "USD",
+    department: null,
+    jobTitle: null,
+    employmentStatus: "ACTIVE",
+    joinedAt: null,
+    exitedAt: null,
     roleId: employeeRole.id,
   });
 
@@ -164,4 +191,107 @@ export async function refreshAuthSession(
   const session = await createAuthSession(log, app, user, roleName);
   log.info({ userId: user.id }, "Refresh auth session - completed");
   return session;
+}
+
+/**
+ * Creates a 10-minute OTP, emails it, and always returns the same ack
+ * message whether or not the email is registered (anti-enumeration).
+ */
+export async function requestPasswordReset(
+  logger: Logger,
+  input: ForgotPasswordInput
+): Promise<{ message: string }> {
+  const log = scopedLogger(logger, LAYER, "requestPasswordReset");
+  log.info({ email: input.email }, "Forgot password - processing");
+
+  const user = await userRepository.findByEmail(log, input.email);
+  if (!user) {
+    log.info({ email: input.email }, "Forgot password - no user, returning generic ack");
+    return { message: FORGOT_PASSWORD_ACK };
+  }
+
+  const { otp, otpHash } = generatePasswordResetOtp();
+  await passwordResetOtpRepository.invalidateActiveForUser(log, user.id);
+  await passwordResetOtpRepository.create(log, {
+    userId: user.id,
+    otpHash,
+    expiresAt: passwordResetOtpRepository.otpExpiresAt(),
+  });
+
+  const subject = "ACME Pay — password reset code";
+  const text = [
+    `Hi ${user.firstName},`,
+    "",
+    `Your password reset code is: ${otp}`,
+    "",
+    "This code expires in 10 minutes. If you did not request a reset, you can ignore this email.",
+  ].join("\n");
+  const html = `<p>Hi ${user.firstName},</p><p>Your password reset code is: <strong style="font-size:1.25rem;letter-spacing:0.12em">${otp}</strong></p><p>This code expires in <strong>10 minutes</strong>. If you did not request a reset, you can ignore this email.</p>`;
+
+  const sent = await sendMail(log, { to: user.email, subject, text, html });
+  if (!sent) {
+    if (env.nodeEnv === "development") {
+      log.warn({ email: user.email, otp }, "Forgot password - SMTP skipped; OTP logged for local testing");
+    } else {
+      throw new AppError(
+        "Unable to send reset email right now. Please try again later.",
+        503,
+        "EMAIL_SEND_FAILED"
+      );
+    }
+  }
+
+  log.info({ userId: user.id }, "Forgot password - completed");
+  return { message: FORGOT_PASSWORD_ACK };
+}
+
+/**
+ * Verifies a still-valid OTP, sets the new password, marks the OTP used,
+ * and revokes every refresh token so existing sessions must re-login.
+ */
+export async function resetPasswordWithOtp(logger: Logger, input: ResetPasswordInput): Promise<{ message: string }> {
+  const log = scopedLogger(logger, LAYER, "resetPasswordWithOtp");
+  log.info({ email: input.email }, "Reset password - processing");
+
+  const user = await userRepository.findByEmail(log, input.email);
+  if (!user) {
+    throw new AppError("Invalid or expired reset code.", 400, "INVALID_OTP");
+  }
+
+  const otpHash = hashRefreshToken(input.otp);
+  const row = await passwordResetOtpRepository.findValidByUserAndHash(log, user.id, otpHash);
+  if (!row) {
+    log.warn({ userId: user.id }, "Reset password - invalid or expired OTP");
+    throw new AppError("Invalid or expired reset code.", 400, "INVALID_OTP");
+  }
+
+  user.password = input.newPassword;
+  await userRepository.save(log, user);
+  await passwordResetOtpRepository.markUsed(log, row.id);
+  await refreshTokenRepository.revokeAllForUser(log, user.id);
+  await invalidateNamespace(log, CACHE_NAMESPACE.USERS);
+
+  log.info({ userId: user.id }, "Reset password - completed");
+  return { message: "Password updated. You can sign in with your new password." };
+}
+
+/**
+ * Revokes the presented refresh token (and all other active refresh tokens
+ * for that user) so Sign out cannot be undone with a leftover refresh cookie.
+ */
+export async function logout(logger: Logger, input: LogoutInput): Promise<{ message: string }> {
+  const log = scopedLogger(logger, LAYER, "logout");
+  log.info("Logout - processing");
+
+  const tokenHash = hashRefreshToken(input.refreshToken);
+  const stored = await refreshTokenRepository.findByTokenHash(log, tokenHash);
+
+  if (stored && !stored.revokedAt) {
+    await refreshTokenRepository.revokeAllForUser(log, stored.userId);
+    log.info({ userId: stored.userId }, "Logout - completed");
+  } else {
+    log.info("Logout - token already invalid; treating as success");
+  }
+
+  return { message: "Signed out successfully." };
 }

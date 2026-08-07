@@ -3,27 +3,35 @@ import { listAttendance } from "../../api/attendance";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { Loading } from "../../components/Loading";
 import { PageHeader } from "../../components/PageHeader";
-import type { Attendance } from "../../types";
+import { PaginationBar } from "../../components/PaginationBar";
+import { PAGE_SIZE } from "../../constants";
+import type { Attendance, Pagination } from "../../types";
 import { getErrorMessage } from "../../utils/errors";
+
+const EMPTY_PAGINATION: Pagination = { page: 1, limit: PAGE_SIZE, total: 0, totalPages: 1 };
 
 export function AttendanceListPage() {
   const [items, setItems] = useState<Attendance[]>([]);
+  const [pagination, setPagination] = useState<Pagination>(EMPTY_PAGINATION);
+  const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     void (async () => {
       setLoading(true);
+      setError(null);
       try {
-        const data = await listAttendance({ page: 1, limit: 50 });
+        const data = await listAttendance({ page, limit: PAGE_SIZE });
         setItems(data.items);
+        setPagination(data.pagination);
       } catch (err) {
         setError(getErrorMessage(err));
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [page]);
 
   return (
     <section>
@@ -65,6 +73,7 @@ export function AttendanceListPage() {
               )}
             </tbody>
           </table>
+          <PaginationBar pagination={pagination} onPageChange={setPage} disabled={loading} />
         </div>
       )}
     </section>

@@ -298,10 +298,45 @@ Seeder has been run too (ADMIN/HR/EMPLOYEE roles + one bootstrap admin user).
 -------------------------------------------------------------------------------
 11. STILL TO DO / OPEN ITEMS
 -------------------------------------------------------------------------------
-[ ] Auto-seed a starter set of permission grants for HR/EMPLOYEE roles
-    (currently both roles have ZERO permission grants until Admin manually
-    creates them via POST /api/permissions)
-[ ] Payroll / compensation module (not started)
+[ ] Optional: Bulk CSV *upload* API/UI (10k seed already covers scale demo)
+[ ] Optional: Analytics polish — median, FX conversion, date filters
+
+
+-------------------------------------------------------------------------------
+15. 10K EMPLOYEE SEED + UNIT TESTS
+-------------------------------------------------------------------------------
+[DONE] Seeder `20260807140000-seed-10k-employees.cjs`
+       - Idempotent: skips if active EMPLOYEE count already >= 10,000
+       - Multi-country (IN/US/GB/DE/AE/SG/AU/CA) with matching currencies
+       - One current salary package per employee (deterministic variance)
+       - Shared bcrypt hash for speed; password Employee@1234
+       - npm run db:seed:10k
+[DONE] Pure helpers `src/utils/salary-math.ts` (parseMoney, dayBefore,
+       computePayComponents, aggregateSalaryBuckets, analyticsBucketsToCsv)
+[DONE] Vitest unit tests in `backend/tests/` (22 tests, no DB):
+       - salary-math, csv, salary/user validation schemas
+       - npm test / npm run test:watch
+
+
+-------------------------------------------------------------------------------
+14. SALARY / PAYROLL  (src/modules/salaries/)
+-------------------------------------------------------------------------------
+[DONE] User employment master fields: country, currency, department, jobTitle,
+       employmentStatus, joinedAt, exitedAt (migration + model + validation;
+       HR/Admin may set on create/update; Employee cannot self-edit these)
+[DONE] Salary model (`salaries`): userId, currency, base/allowances/deductions,
+       effectiveFrom/effectiveTo, note, createdBy — revising pay closes the
+       previous open package (partial unique index where effectiveTo IS NULL)
+[DONE] Payslip model (`payslips`): monthly snapshot unique per user/year/month
+[DONE] POST/GET /api/salaries, GET /api/salaries/:id, GET /api/salaries/history/:userId
+[DONE] POST/GET /api/salaries/payslips
+[DONE] GET /api/salaries/analytics?groupBy=country|currency|department|role
+       (&format=csv)
+[DONE] Redis cache namespaces: cache:salaries, cache:payslips
+[DONE] Seeder `seed-role-permissions`: default ACTIVE grants for HR + Employee
+       (users, attendance, salaries routes)
+[DONE] Frontend: SalariesPage, PayrollAnalyticsPage; nav for Admin/HR/Employee
+[DONE] Duplicate permission create races return 409 (unique constraint catch)
 
 
 -------------------------------------------------------------------------------

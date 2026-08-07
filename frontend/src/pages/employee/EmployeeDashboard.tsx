@@ -20,6 +20,10 @@ export function EmployeeDashboard() {
           <h3>Attendance report</h3>
           <p>View or download reports for the past 6 months.</p>
         </Link>
+        <Link className="dash-card" to="/employee/salary">
+          <h3>My salary</h3>
+          <p>View your current package and payslips.</p>
+        </Link>
         <Link className="dash-card" to="/employee/profile">
           <h3>Edit profile</h3>
           <p>Update your name and contact (mobile) details.</p>

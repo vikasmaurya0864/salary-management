@@ -34,7 +34,7 @@ export function AdminDashboard() {
     <section>
       <PageHeader
         title={`Welcome, ${user?.firstName ?? "Admin"}`}
-        subtitle="Full portal access: users, roles, permissions, attendance, and reports."
+        subtitle="Full workspace control — people, access, compensation, and attendance."
       />
       <ErrorBanner message={error} />
 
@@ -74,6 +74,14 @@ export function AdminDashboard() {
         <Link className="dash-card" to="/admin/users">
           <h3>Users</h3>
           <p>Create HR/Employee accounts and allocate roles.</p>
+        </Link>
+        <Link className="dash-card" to="/admin/salaries">
+          <h3>Salaries</h3>
+          <p>Compensation packages and monthly payslips.</p>
+        </Link>
+        <Link className="dash-card" to="/admin/payroll">
+          <h3>Payroll analytics</h3>
+          <p>How the org pays people — by country, currency, dept, role.</p>
         </Link>
         <Link className="dash-card" to="/admin/permissions">
           <h3>Permissions</h3>

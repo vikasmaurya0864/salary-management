@@ -1,3 +1,4 @@
+import type { CurrencyCode, EmploymentStatus } from "../constants/employment";
 import { Role, User } from "../models";
 import type { Logger } from "../utils/logger";
 import { scopedLogger } from "../utils/scoped-logger";
@@ -12,6 +13,13 @@ export interface CreateUserRow {
   password: string;
   mobile: string;
   address: string | null;
+  country: string | null;
+  currency: CurrencyCode;
+  department: string | null;
+  jobTitle: string | null;
+  employmentStatus: EmploymentStatus;
+  joinedAt: string | null;
+  exitedAt: string | null;
   roleId: string;
 }
 

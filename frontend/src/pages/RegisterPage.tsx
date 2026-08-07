@@ -46,51 +46,65 @@ export function RegisterPage() {
 
   return (
     <div className="auth-screen">
-      <div className="auth-panel">
-        <p className="eyebrow">Salary Management</p>
-        <h1>Employee registration</h1>
-        <p className="lede">Self-register as an employee. Admin/HR can assign other roles later.</p>
-        <ErrorBanner message={error} />
-        <form className="form" onSubmit={onSubmit}>
-          <div className="grid-2">
+      <aside className="auth-hero">
+        <div className="auth-hero-inner">
+          <span className="brand-mark">AC</span>
+          <h1>ACME Pay</h1>
+          <p>Join your organisation’s salary workspace — track pay, attendance, and profile in one portal.</p>
+        </div>
+      </aside>
+      <div className="auth-panel-wrap">
+        <div className="auth-panel">
+          <p className="eyebrow">New employee</p>
+          <h1>Create account</h1>
+          <p className="lede">Self-register as an employee. HR can update your role and compensation later.</p>
+          <ErrorBanner message={error} />
+          <form className="form" onSubmit={onSubmit}>
+            <div className="grid-2">
+              <label>
+                First name
+                <input value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required />
+              </label>
+              <label>
+                Last name
+                <input value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} required />
+              </label>
+            </div>
             <label>
-              First name
-              <input value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required />
+              Email
+              <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
             </label>
             <label>
-              Last name
-              <input value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} required />
+              Mobile
+              <input
+                value={form.mobile}
+                onChange={(e) => setForm({ ...form, mobile: e.target.value })}
+                required
+                placeholder="+919876543210"
+              />
             </label>
-          </div>
-          <label>
-            Email
-            <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
-          </label>
-          <label>
-            Mobile
-            <input value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} required placeholder="+919876543210" />
-          </label>
-          <label>
-            Address (optional)
-            <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
-          </label>
-          <label>
-            Password
-            <input
-              type="password"
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              required
-              minLength={8}
-            />
-          </label>
-          <button className="btn btn-primary" type="submit" disabled={loading}>
-            {loading ? "Creating…" : "Create account"}
-          </button>
-        </form>
-        <p className="auth-foot">
-          Already have an account? <Link to="/login">Sign in</Link>
-        </p>
+            <label>
+              Address (optional)
+              <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+            </label>
+            <label>
+              Password
+              <input
+                type="password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                required
+                minLength={8}
+              />
+            </label>
+            <button className="btn btn-primary" type="submit" disabled={loading}>
+              {loading ? "Creating…" : "Create account"}
+            </button>
+          </form>
+          <p className="auth-foot">
+            Already have an account? <Link to="/login">Sign in</Link>
+          </p>
+        </div>
       </div>
     </div>
   );

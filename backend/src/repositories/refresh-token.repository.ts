@@ -49,3 +49,15 @@ export async function revokeById(logger: Logger, id: string): Promise<void> {
   await RefreshToken.update({ revokedAt: new Date() }, { where: { id, revokedAt: null } });
   log.info({ id }, "Revoke refresh token - completed");
 }
+
+/** Revokes every still-active refresh token for a user (logout / password reset). */
+export async function revokeAllForUser(logger: Logger, userId: string): Promise<number> {
+  const log = scopedLogger(logger, LAYER, "revokeAllForUser");
+  log.info({ userId }, "Revoke all refresh tokens - updating database");
+  const [count] = await RefreshToken.update(
+    { revokedAt: new Date() },
+    { where: { userId, revokedAt: null } }
+  );
+  log.info({ userId, count }, "Revoke all refresh tokens - completed");
+  return count;
+}

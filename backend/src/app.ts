@@ -22,9 +22,12 @@ export function buildApp(): FastifyInstance {
 
   // Allow the React frontend (Vite default :5173) to call /api during local
   // development. Tighten origin in production as needed.
+  // Explicit methods: @fastify/cors defaults to GET/HEAD/POST only, which
+  // blocks PUT/PATCH/DELETE (browsers surface that as a CORS error).
   void app.register(cors, {
     origin: true,
     credentials: true,
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-API-Key"],
   });
 

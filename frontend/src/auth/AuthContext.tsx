@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import * as authApi from "../api/auth";
-import { clearSession, getStoredUser, saveSession, setStoredUser } from "../api/storage";
+import { clearSession, getRefreshToken, getStoredUser, saveSession, setStoredUser } from "../api/storage";
 import type { AuthSession, RoleName, User } from "../types";
 
 interface AuthContextValue {
@@ -23,7 +23,7 @@ interface AuthContextValue {
     mobile: string;
     address?: string;
   }) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   updateLocalUser: (user: User) => void;
 }
 
@@ -57,9 +57,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  const logout = useCallback(() => {
-    clearSession();
-    setUser(null);
+  const logout = useCallback(async () => {
+    const refreshToken = getRefreshToken();
+    try {
+      if (refreshToken) {
+        await authApi.logout(refreshToken);
+      }
+    } catch {
+      // Always clear local session even if the revoke call fails (offline, etc.).
+    } finally {
+      clearSession();
+      setUser(null);
+    }
   }, []);
 
   const updateLocalUser = useCallback((next: User) => {

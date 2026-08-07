@@ -5,6 +5,9 @@ import { Permission } from "./permission.model";
 import { Attendance } from "./attendance.model";
 import { AttendanceCorrectionRequest } from "./attendance-correction-request.model";
 import { RefreshToken } from "./refresh-token.model";
+import { PasswordResetOtp } from "./password-reset-otp.model";
+import { Salary } from "./salary.model";
+import { Payslip } from "./payslip.model";
 
 Role.hasMany(User, { foreignKey: "roleId", as: "users" });
 User.belongsTo(Role, { foreignKey: "roleId", as: "role" });
@@ -28,4 +31,27 @@ AttendanceCorrectionRequest.belongsTo(User, { foreignKey: "reviewedBy", as: "rev
 User.hasMany(RefreshToken, { foreignKey: "userId", as: "refreshTokens" });
 RefreshToken.belongsTo(User, { foreignKey: "userId", as: "user" });
 
-export { sequelize, Role, User, Permission, Attendance, AttendanceCorrectionRequest, RefreshToken };
+User.hasMany(PasswordResetOtp, { foreignKey: "userId", as: "passwordResetOtps" });
+PasswordResetOtp.belongsTo(User, { foreignKey: "userId", as: "user" });
+
+User.hasMany(Salary, { foreignKey: "userId", as: "salaries" });
+Salary.belongsTo(User, { foreignKey: "userId", as: "user" });
+Salary.belongsTo(User, { foreignKey: "createdBy", as: "creator" });
+
+User.hasMany(Payslip, { foreignKey: "userId", as: "payslips" });
+Payslip.belongsTo(User, { foreignKey: "userId", as: "user" });
+Payslip.belongsTo(Salary, { foreignKey: "salaryId", as: "salary" });
+Payslip.belongsTo(User, { foreignKey: "generatedBy", as: "generator" });
+
+export {
+  sequelize,
+  Role,
+  User,
+  Permission,
+  Attendance,
+  AttendanceCorrectionRequest,
+  RefreshToken,
+  PasswordResetOtp,
+  Salary,
+  Payslip,
+};
